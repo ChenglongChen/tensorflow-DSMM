@@ -74,6 +74,7 @@ params = {
     # match pyramid
     "mp_num_filters": 8,
     "mp_filter_sizes": 3,
+    "mp_dynamic_pooling": False,
     "mp_pool_size_word": 4,
     "mp_pool_size_char": 4,
 }

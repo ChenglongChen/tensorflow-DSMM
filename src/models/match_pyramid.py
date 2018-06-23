@@ -1,7 +1,7 @@
 
-import numpy as np
 import tensorflow as tf
 
+from inputs.dynamic_pooling import dynamic_pooling_index
 from models.base_model import BaseModel
 from tf_common.nn_module import dense_block, resnet_block
 
@@ -35,11 +35,11 @@ class MatchPyramidBaseModel(BaseModel):
             strides=1,
             reuse=False,
             name="cross_conv_%s" % granularity)
-        # dynamic pooling
-        cross_conv_expand = tf.gather_nd(cross_conv, dpool_index)
+        if self.params["mp_dynamic_pooling"]:
+            cross_conv = tf.gather_nd(cross_conv, dpool_index)
         pool_size = self.params["mp_pool_size_%s" % granularity]
         cross_pool = tf.layers.max_pooling2d(
-            inputs=cross_conv_expand,
+            inputs=cross_conv,
             pool_size=[self.params["max_sequence_length_%s" % granularity] / pool_size,
                        self.params["max_sequence_length_%s" % granularity] / pool_size],
             strides=[self.params["max_sequence_length_%s" % granularity] / pool_size,
@@ -52,37 +52,21 @@ class MatchPyramidBaseModel(BaseModel):
         return cross
 
 
-    # see https://github.com/pl8787/MatchPyramid-TensorFlow
-    def _dynamic_pooling_index(self, len1, len2, max_len1, max_len2):
-        def dpool_index_(batch_idx, len1_one, len2_one):
-            stride1 = 1.0 * max_len1 / len1_one
-            stride2 = 1.0 * max_len2 / len2_one
-            idx1_one = (np.arange(max_len1)/stride1).astype(int)
-            idx2_one = (np.arange(max_len2)/stride2).astype(int)
-            mesh1, mesh2 = np.meshgrid(idx1_one, idx2_one)
-            index_one = np.transpose(np.stack([np.ones(mesh1.shape) * batch_idx, mesh1, mesh2]), (2,1,0))
-            return index_one
-        index = []
-        index_append = index.append
-        for i in range(len(len1)):
-            index_append(dpool_index_(i, len1[i], len2[i]))
-        return np.array(index)
-
-
     def _get_feed_dict(self, X, idx, Q, construct_neg=False, training=False, symmetric=False):
         feed_dict = super(MatchPyramidBaseModel, self)._get_feed_dict(X, idx, Q, construct_neg, training, symmetric)
-        dpool_index_word = self._dynamic_pooling_index(feed_dict[self.seq_len_word_left],
-                                                      feed_dict[self.seq_len_word_right],
-                                                      self.params["max_sequence_length_word"],
-                                                      self.params["max_sequence_length_word"])
-        dpool_index_char = self._dynamic_pooling_index(feed_dict[self.seq_len_char_left],
-                                                      feed_dict[self.seq_len_char_right],
-                                                      self.params["max_sequence_length_char"],
-                                                      self.params["max_sequence_length_char"])
-        feed_dict.update({
-            self.dpool_index_word: dpool_index_word,
-            self.dpool_index_char: dpool_index_char,
-        })
+        if self.params["mp_dynamic_pooling"]:
+            dpool_index_word = dynamic_pooling_index(feed_dict[self.seq_len_word_left],
+                                                          feed_dict[self.seq_len_word_right],
+                                                          self.params["max_sequence_length_word"],
+                                                          self.params["max_sequence_length_word"])
+            dpool_index_char = dynamic_pooling_index(feed_dict[self.seq_len_char_left],
+                                                          feed_dict[self.seq_len_char_right],
+                                                          self.params["max_sequence_length_char"],
+                                                          self.params["max_sequence_length_char"])
+            feed_dict.update({
+                self.dpool_index_word: dpool_index_word,
+                self.dpool_index_char: dpool_index_char,
+            })
         return feed_dict
 
 

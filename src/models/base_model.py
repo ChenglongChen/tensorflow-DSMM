@@ -305,15 +305,33 @@ class BaseModel(object):
             q1 = X["q1"][idx]
             q2 = X["q2"][idx]
             feed_dict = {
-                self.seq_word_left: Q["words"][q2],
-                self.seq_word_right: Q["words"][q1],
-                self.seq_char_left: Q["chars"][q2],
-                self.seq_char_right: Q["chars"][q1],
-                self.seq_len_word_left: Q["sequence_length_word"][q2],
-                self.seq_len_word_right: Q["sequence_length_word"][q1],
-                self.seq_len_char_left: Q["sequence_length_char"][q2],
-                self.seq_len_char_right: Q["sequence_length_char"][q1],
-                self.labels: X["label"][idx],
+                self.seq_word_left: np.vstack([Q["words"][q1],
+                                               Q["words"][q2],
+                                               ]),
+                self.seq_word_right: np.vstack([Q["words"][q2],
+                                                Q["words"][q1],
+                                                ]),
+                self.seq_char_left: np.vstack([Q["chars"][q1],
+                                               Q["chars"][q2],
+                                               ]),
+                self.seq_char_right: np.vstack([Q["chars"][q2],
+                                                Q["chars"][q1],
+                                                ]),
+                self.seq_len_word_left: np.hstack([Q["sequence_length_word"][q1],
+                                                   Q["sequence_length_word"][q2],
+                                                   ]),
+                self.seq_len_word_right: np.hstack([Q["sequence_length_word"][q2],
+                                                    Q["sequence_length_word"][q1],
+                                                    ]),
+                self.seq_len_char_left: np.hstack([Q["sequence_length_char"][q1],
+                                                   Q["sequence_length_char"][q2],
+                                                   ]),
+                self.seq_len_char_right: np.hstack([Q["sequence_length_char"][q2],
+                                                    Q["sequence_length_char"][q1],
+                                                    ]),
+                self.labels: np.hstack([X["label"][idx],
+                                        X["label"][idx],
+                                        ]),
                 self.training: training,
             }
         return feed_dict
@@ -343,7 +361,8 @@ class BaseModel(object):
                     y_valid = validation_data["label"]
                     y_proba = self.predict_proba(validation_data, Q)
                     valid_loss = log_loss(y_valid, y_proba, eps=1e-15)
-                    y_proba_cal = self.predict_calibration_proba(validation_data, Q)
+                    # y_proba_cal = self.predict_calibration_proba(validation_data, Q)
+                    y_proba_cal = y_proba
                     valid_loss_cal = log_loss(y_valid, y_proba_cal, eps=1e-15)
                     self.logger.info(
                         "[epoch-%d, batch-%d] train-loss=%.5f, valid-loss=%.5f, valid-loss-cal=%.5f, valid-proba=%.5f, predict-proba=%.5f, predict-proba-cal=%.5f, lr=%.5f [%.1f s]" % (
@@ -356,7 +375,7 @@ class BaseModel(object):
 
 
     def predict_calibration_proba(self, X, Q):
-        y_logit = self.predict_proba(X, Q)
+        y_logit = self.predict_logit(X, Q)
         y_valid = X["label"]
         if self.calibration_model is None:
             self.calibration_model = LogisticRegression()
@@ -372,13 +391,10 @@ class BaseModel(object):
         y_pred = []
         y_pred_append = y_pred.append
         for idx in batches:
-            # original
-            feed_dict = self._get_feed_dict(X, idx, Q, training=False, symmetric=False)
-            pred_1 = self.sess.run((self.proba), feed_dict=feed_dict)
-            # symmetric
             feed_dict = self._get_feed_dict(X, idx, Q, training=False, symmetric=True)
-            pred_2 = self.sess.run((self.logits), feed_dict=feed_dict)
-            pred = (pred_1 + pred_2) / 2.
+            pred = self.sess.run((self.logits), feed_dict=feed_dict)
+            n = int(pred.shape[0]/2)
+            pred = (pred[:n] + pred[n:])/2.
             y_pred_append(pred)
         y_pred = np.hstack(y_pred).reshape((-1, 1)).astype(np.float64)
         return y_pred
@@ -391,13 +407,10 @@ class BaseModel(object):
         y_pred = []
         y_pred_append = y_pred.append
         for idx in batches:
-            # original
-            feed_dict = self._get_feed_dict(X, idx, Q, training=False, symmetric=False)
-            pred_1 = self.sess.run((self.proba), feed_dict=feed_dict)
-            # symmetric
             feed_dict = self._get_feed_dict(X, idx, Q, training=False, symmetric=True)
-            pred_2 = self.sess.run((self.proba), feed_dict=feed_dict)
-            pred = (pred_1 + pred_2) / 2.
+            pred = self.sess.run((self.proba), feed_dict=feed_dict)
+            n = int(pred.shape[0] / 2)
+            pred = (pred[:n] + pred[n:]) / 2.
             y_pred_append(pred)
         y_pred = np.hstack(y_pred).reshape((-1, 1)).astype(np.float64)
         return y_pred
