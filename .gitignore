@@ -105,7 +105,7 @@ venv.bak/
 #
 .idea
 __pycache__
-analysis.ipynb
-dp.pkl
+src/inputs/pair_generator.py
 tmp.py
-weights/*
+*.ipynb*
+weights

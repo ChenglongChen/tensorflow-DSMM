@@ -1,15 +1,7 @@
 
 import os
-import datetime
 import logging
 import logging.handlers
-import shutil
-
-
-def _timestamp():
-    now = datetime.datetime.now()
-    now_str = now.strftime("%Y%m%d%H%M")
-    return now_str
 
 
 def _get_logger(logdir, logname, loglevel=logging.INFO):
@@ -26,12 +18,3 @@ def _get_logger(logdir, logname, loglevel=logging.INFO):
     logger.addHandler(handler)
     logger.setLevel(loglevel)
     return logger
-
-
-def _makedirs(dir, force=False):
-    if os.path.exists(dir):
-        if force:
-            shutil.rmtree(dir)
-            os.makedirs(dir)
-    else:
-        os.makedirs(dir)

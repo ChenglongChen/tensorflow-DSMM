@@ -4,7 +4,7 @@ import tensorflow as tf
 
 """
 https://explosion.ai/blog/deep-learning-formula-nlp
-embed -> encode -> attend -> matching -> predict
+embed -> encode -> attend -> predict
 """
 def batch_normalization(x, training, name):
     # with tf.variable_scope(name, reuse=)
