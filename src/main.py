@@ -1,5 +1,6 @@
 
 import sys
+import numpy as np
 
 import config
 
@@ -20,8 +21,10 @@ def get_model_data(dataset, params):
 
 
 params = {
+    "model_name": "semantic_matching",
     "offline_model_dir": "./weights/semantic_matching",
     "construct_neg": False,
+    "n_runs": 10,
     "batch_size": 256,
     "epoch": 20,
     "l2_lambda": 0.000,
@@ -77,9 +80,12 @@ params = {
     "mp_dynamic_pooling": False,
     "mp_pool_size_word": 4,
     "mp_pool_size_char": 4,
-}
 
-model_name = "semantic_matching"
+    # bcnn
+    "bcnn_model_type": "BCNN",
+    "bcnn_num_filters": 8,
+    "bcnn_filter_sizes": 3,
+}
 
 
 def main():
@@ -93,9 +99,12 @@ def main():
 
     Q = load_question(params)
     dfTrain = load_train()
+    dfTest = load_test()
+    X_test = get_model_data(dfTest, params)
 
     # shuffle training data
     dfTrain = dfTrain.sample(frac=1.0)
+
 
     # validation
     train_ratio = 0.7
@@ -104,17 +113,23 @@ def main():
     X_train = get_model_data(dfTrain[:train_num], params)
     X_valid = get_model_data(dfTrain[train_num:], params)
 
-    model = get_model(model_type)(model_name, params, logger, params["threshold"],
-                                  params["calibration_factor"],
-                                  training=True,
+    model = get_model(model_type)(params, logger,
                                   init_embedding_matrix=init_embedding_matrix)
     model.fit(X_train, Q, validation_data=X_valid, shuffle=True)
 
-    dfTest = load_test()
-    X_test = get_model_data(dfTest, params)
 
-    dfTest["y_pre"] = model.predict_proba(X_test, Q)
-    dfTest[["y_pre"]].to_csv(config.SUB_FILE, header=True, index=False)
+    # submit
+    X_train = get_model_data(dfTrain, params)
+    y_proba = np.zeros((dfTest.shape[0], params["n_runs"]), dtype=np.float32)
+    for run in range(params["n_runs"]):
+        params["random_seed"] = run
+        params["model_name"] = "semantic_model_%s"%str(run+1)
+        model = get_model(model_type)(params, logger,
+                                      init_embedding_matrix=init_embedding_matrix)
+        model.fit(X_train, Q, validation_data=None, shuffle=True)
+        y_proba[:,run] = model.predict_proba(X_test, Q).flatten()
+        dfTest["y_pre"] = np.mean(y_proba[:,:(run+1)], axis=1)
+        dfTest[["y_pre"]].to_csv(config.SUB_FILE_PATTERN%str(run+1), header=True, index=False)
 
 
 if __name__ == "__main__":

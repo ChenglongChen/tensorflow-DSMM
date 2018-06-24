@@ -5,10 +5,8 @@ from models.match_pyramid import MatchPyramidBaseModel
 
 
 class DSMM(MatchPyramidBaseModel):
-    def __init__(self, model_name, params, logger, threshold=0.5, calibration_factor=1., training=True,
-                 init_embedding_matrix=None):
-        super(DSMM, self).__init__(model_name, params, logger, threshold, calibration_factor, training,
-                                            init_embedding_matrix)
+    def __init__(self, params, logger, init_embedding_matrix=None):
+        super(DSMM, self).__init__(params, logger, init_embedding_matrix)
 
     def _build_model(self):
         with tf.name_scope(self.model_name):
@@ -93,13 +91,4 @@ class DSMM(MatchPyramidBaseModel):
                 logits = tf.squeeze(logits, axis=1)
                 proba = tf.nn.sigmoid(logits)
 
-            with tf.name_scope("loss"):
-                loss = tf.nn.sigmoid_cross_entropy_with_logits(labels=self.labels, logits=logits)
-                loss = tf.reduce_mean(loss, name="log_loss")
-                if self.params["l2_lambda"] > 0:
-                    l2_losses = tf.add_n(
-                        [tf.nn.l2_loss(v) for v in tf.trainable_variables() if "bias" not in v.name]) * self.params[
-                                    "l2_lambda"]
-                    loss = loss + l2_losses
-
-        return loss, logits, proba
+        return logits, proba

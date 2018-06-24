@@ -12,19 +12,19 @@ from tf_common.nn_module import encode, attend
 
 
 class BaseModel(object):
-    def __init__(self, model_name, params, logger, threshold=0.5, calibration_factor=1., training=True,
-                 init_embedding_matrix=None):
-        self.model_name = model_name
+    def __init__(self, params, logger, init_embedding_matrix=None):
         self.params = params
         self.logger = logger
-        self.threshold = threshold
-        self.calibration_factor = calibration_factor
         self.init_embedding_matrix = init_embedding_matrix
+        self.model_name = self.params["model_name"]
+        self.threshold = self.params["threshold"]
+        self.calibration_factor = self.params["calibration_factor"]
         self.calibration_model = None
-        os_utils._makedirs(self.params["offline_model_dir"], force=training)
+        # os_utils._makedirs(self.params["offline_model_dir"], force=True)
 
         self._init_tf_vars()
-        self.loss, self.logits, self.proba = self._build_model()
+        self.logits, self.proba = self._build_model()
+        self.loss = self._get_loss()
         self.train_op = self._get_train_op()
 
         self.sess, self.saver = self._init_session()
@@ -142,6 +142,18 @@ class BaseModel(object):
 
     def _build_model(self):
         pass
+
+
+    def _get_loss(self):
+        with tf.name_scope("loss"):
+            loss = tf.nn.sigmoid_cross_entropy_with_logits(labels=self.labels, logits=self.logits)
+            loss = tf.reduce_mean(loss, name="log_loss")
+            if self.params["l2_lambda"] > 0:
+                l2_losses = tf.add_n(
+                    [tf.nn.l2_loss(v) for v in tf.trainable_variables() if "bias" not in v.name]) * self.params[
+                                "l2_lambda"]
+                loss = loss + l2_losses
+        return loss
 
 
     def _get_train_op(self):
@@ -334,11 +346,12 @@ class BaseModel(object):
         return feed_dict
 
 
-    def fit(self, X, Q, validation_data, shuffle=False):
+    def fit(self, X, Q, validation_data=None, shuffle=False):
         start_time = time.time()
         l = X["label"].shape[0]
         self.logger.info("fit on %d sample" % l)
-        self.logger.info("mean: %.5f"%np.mean(validation_data["label"]))
+        if validation_data is not None:
+            self.logger.info("mean: %.5f"%np.mean(validation_data["label"]))
         train_idx_shuffle = np.arange(l)
         total_loss = 0.
         loss_decay = 0.9

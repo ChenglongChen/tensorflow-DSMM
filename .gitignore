@@ -109,3 +109,4 @@ src/inputs/pair_generator.py
 tmp.py
 *.ipynb*
 weights
+*.sh

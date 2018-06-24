@@ -11,3 +11,4 @@ WORD_EMBEDDING_FILE = DATA_DIR + "/word_embed.txt"
 CHAR_EMBEDDING_FILE = DATA_DIR + "/char_embed.txt"
 
 SUB_FILE = "submission.csv"
+SUB_FILE_PATTERN = "submission_%s.csv"
