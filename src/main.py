@@ -1,6 +1,7 @@
 
 import sys
 import numpy as np
+import tensorflow as tf
 
 import config
 
@@ -77,14 +78,16 @@ params = {
     # match pyramid
     "mp_num_filters": 8,
     "mp_filter_sizes": 3,
+    "mp_activation": tf.nn.relu,
     "mp_dynamic_pooling": False,
     "mp_pool_size_word": 4,
     "mp_pool_size_char": 4,
 
     # bcnn
-    "bcnn_model_type": "BCNN",
     "bcnn_num_filters": 8,
     "bcnn_filter_sizes": 3,
+    "bcnn_activation": tf.nn.tanh,
+    "bcnn_match_score_type": "cosine", # euclidean/euclidean_exp produce nan
 }
 
 
@@ -113,8 +116,7 @@ def main():
     X_train = get_model_data(dfTrain[:train_num], params)
     X_valid = get_model_data(dfTrain[train_num:], params)
 
-    model = get_model(model_type)(params, logger,
-                                  init_embedding_matrix=init_embedding_matrix)
+    model = get_model(model_type)(params, logger, init_embedding_matrix=init_embedding_matrix)
     model.fit(X_train, Q, validation_data=X_valid, shuffle=True)
 
 
@@ -124,8 +126,7 @@ def main():
     for run in range(params["n_runs"]):
         params["random_seed"] = run
         params["model_name"] = "semantic_model_%s"%str(run+1)
-        model = get_model(model_type)(params, logger,
-                                      init_embedding_matrix=init_embedding_matrix)
+        model = get_model(model_type)(params, logger, init_embedding_matrix=init_embedding_matrix)
         model.fit(X_train, Q, validation_data=None, shuffle=True)
         y_proba[:,run] = model.predict_proba(X_test, Q).flatten()
         dfTest["y_pre"] = np.mean(y_proba[:,:(run+1)], axis=1)

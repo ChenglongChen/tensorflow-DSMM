@@ -11,50 +11,57 @@ class BCNNBaseModel(BaseModel):
 
 
     def _padding(self, x, name):
-        # x: [batch, maxlen, d, 1]
-        # x => [batch, maxlen+w*2-2, d, 1]
+        # x: [batch, s, d, 1]
+        # x => [batch, s+w*2-2, d, 1]
         w = self.params["bcnn_filter_sizes"]
         return tf.pad(x, np.array([[0, 0], [w - 1, w - 1], [0, 0], [0, 0]]), "CONSTANT", name)
 
 
-    # TODO fix nan in ABCNN1/2/3 due to here
     def _make_attention_mat(self, x1, x2):
-        # x1: [batch, maxlen1, dim, 1]
-        # x2: [batch, maxlen2, dim, 1]
-        # x1 => [batch, maxlen1, 1, dim]
-        # x2 => [batch, 1, maxlen2, dim]
-        x1_ = tf.transpose(x1, perm=[0,1,3,2])
-        x2_ = tf.transpose(x2, perm=[0,3,1,2])
-        # x1 - x2: [batch, maxlen1, maxlen2, dim]
-        d = x1_ - x2_
+        # x1: [batch, s1, d, 1]
+        # x2: [batch, s2, d, 1]
         # match score
-        # 1. euclidean distance (produce nan)
-        euclidean = tf.sqrt(tf.reduce_sum(tf.square(d), axis=-1))
-        att = 1. / (1. + euclidean)
-        # 2. Convolutional Neural Network for Paraphrase Identification
-        beta = 2.
-        att = tf.exp(-euclidean/(2. * beta))
+        if "euclidean" in self.params["bcnn_match_score_type"]:
+            # x1 => [batch, s1, 1, d]
+            # x2 => [batch, 1, s2, d]
+            x1_ = tf.transpose(x1, perm=[0, 1, 3, 2])
+            x2_ = tf.transpose(x2, perm=[0, 3, 1, 2])
+            euclidean = tf.sqrt(tf.reduce_sum(tf.square(x1_ - x2_), axis=-1))
+            if "exp" in self.params["bcnn_match_score_type"]:
+                # exp(-euclidean / (2. * beta)) (producenan)
+                # from Convolutional Neural Network for Paraphrase Identification
+                beta = 2.
+                att = tf.exp(-euclidean / (2. * beta))
+            else:
+                # euclidean distance (produce nan)
+                att = 1. / (1. + euclidean)
+        elif self.params["bcnn_match_score_type"] == "cosine":
+            # cosine similarity
+            x1_ = tf.nn.l2_normalize(x1, dim=2)
+            x2_ = tf.nn.l2_normalize(x2, dim=2)
+            sim = tf.einsum("abcd,aecd->abe", x1_, x2_) # value in [-1, 1]
+            att = (1. + sim) / 2. # value in [0, 1]
         return att
 
 
     def _convolution(self, x, d, name, reuse=False):
-        # conv: [batch, maxlen+kernel_size-1, 1, num_outputs]
+        # conv: [batch, s+w-1, 1, d]
         conv = tf.layers.conv2d(
             inputs=x,
             filters=self.params["bcnn_num_filters"],
             kernel_size=(self.params["bcnn_filter_sizes"], d),
             padding="valid",
-            activation=tf.nn.relu,
+            activation=self.params["bcnn_activation"],
             strides=1,
             reuse=reuse,
             name=name)
 
-        # [batch, maxlen+kernel_size-1, num_outputsm, 1]
+        # [batch, s+w-1, d, 1]
         return tf.transpose(conv, perm=[0, 1, 3, 2])
 
 
     def _attention_pooling(self, x, attention, name):
-        # x: [batch, s+w-1, di, 1]
+        # x: [batch, s+w-1, d, 1]
         # attention: [batch, s+w-1]
         if attention is not None:
             attention = tf.expand_dims(tf.expand_dims(attention, axis=-1), axis=-1)
@@ -65,7 +72,7 @@ class BCNNBaseModel(BaseModel):
             inputs=x2,
             pool_size=(self.params["bcnn_filter_sizes"], 1),
             strides=1,
-            padding="VALID",
+            padding="valid",
             name=name)
         if attention is not None:
             w_ap = w_ap * self.params["bcnn_filter_sizes"]
@@ -85,7 +92,7 @@ class BCNNBaseModel(BaseModel):
             inputs=x,
             pool_size=(pool_width, 1),
             strides=1,
-            padding="VALID",
+            padding="valid",
             name=name)
         all_ap_reshaped = tf.reshape(all_ap, [-1, d])
 
@@ -114,10 +121,10 @@ class BCNNBaseModel(BaseModel):
         return None, None, None, None
 
 
-    def _interaction_feature_layer(self, enc_seq_left, enc_seq_right, granularity="word"):
+    def _bcnn_interaction_feature_layer(self, enc_seq_left, enc_seq_right, granularity="word"):
         name = self.model_name + granularity
         seq_len = self.params["max_seq_len_%s"%granularity]
-        # [batch, maxlen, dim] => [batch, maxlen, dim, 1]
+        # [batch, s, d] => [batch, s, d, 1]
         enc_seq_left = tf.expand_dims(enc_seq_left, axis=-1)
         enc_seq_right = tf.expand_dims(enc_seq_right, axis=-1)
 
@@ -144,7 +151,7 @@ class BCNNBaseModel(BaseModel):
                                                                     return_enc=True)
                 _, enc_seq_word_right = self._semantic_feature_layer(self.seq_word_right, granularity="word", reuse=True,
                                                                      return_enc=True)
-                sim_word = self._interaction_feature_layer(enc_seq_word_left, enc_seq_word_right, granularity="word")
+                sim_word = self._bcnn_interaction_feature_layer(enc_seq_word_left, enc_seq_word_right, granularity="word")
 
             with tf.name_scope("char_network"):
                 _, enc_seq_char_left = self._semantic_feature_layer(self.seq_char_left, granularity="char", reuse=False,
@@ -152,7 +159,7 @@ class BCNNBaseModel(BaseModel):
                 _, enc_seq_char_right = self._semantic_feature_layer(self.seq_char_right, granularity="char",
                                                                      reuse=True,
                                                                      return_enc=True)
-                sim_char = self._interaction_feature_layer(enc_seq_char_left, enc_seq_char_right, granularity="char")
+                sim_char = self._bcnn_interaction_feature_layer(enc_seq_char_left, enc_seq_char_right, granularity="char")
 
             with tf.name_scope("prediction"):
                 out_0 = tf.concat([sim_word, sim_char], axis=-1)
@@ -177,7 +184,7 @@ class BCNN(BCNNBaseModel):
 
 
     def _cnn_layer(self, x1, x2, seq_len, d, name):
-        # x1, x2 = [batch, d, s, 1]
+        # x1, x2 = [batch, s, d, 1]
         left_conv = self._convolution(x=self._padding(x1, name=name+"padding_left"), d=d, name=name+"conv", reuse=False)
         right_conv = self._convolution(x=self._padding(x2, name=name+"padding_right"), d=d, name=name+"conv", reuse=True)
 
@@ -197,7 +204,7 @@ class ABCNN1(BCNNBaseModel):
 
 
     def _cnn_layer(self, x1, x2, seq_len, d, name):
-        # x1, x2 = [batch, d, s, 1]
+        # x1, x2 = [batch, s, d, 1]
         x1, x2 = self._expand_input(x1, x2, seq_len, d, name=name+"expand_input")
 
         left_conv = self._convolution(x=self._padding(x1, name=name+"padding_left"), d=d, name=name+"conv", reuse=False)
@@ -242,7 +249,7 @@ class ABCNN3(BCNNBaseModel):
 
 
     def _cnn_layer(self, x1, x2, seq_len, d, name):
-        # x1, x2 = [batch, d, s, 1]
+        # x1, x2 = [batch, s, d, 1]
         x1, x2 = self._expand_input(x1, x2, seq_len, d, name=name + "expand_input")
 
         left_conv = self._convolution(x=self._padding(x1, name=name+"padding_left"), d=d, name=name+"conv", reuse=False)

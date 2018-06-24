@@ -32,7 +32,7 @@ class DSMM(MatchPyramidBaseModel):
                 fm_word = 0.5 * (sum_squared - squared_sum)
 
                 # match pyramid
-                cross_word = self._interaction_feature_layer(enc_seq_word_left, enc_seq_word_right, self.dpool_index_word, granularity="word")
+                cross_word = self._mp_interaction_feature_layer(enc_seq_word_left, enc_seq_word_right, self.dpool_index_word, granularity="word")
 
                 # dense
                 deep_in_word = tf.concat([sem_seq_word_left, sem_seq_word_right], axis=-1)
@@ -62,7 +62,7 @@ class DSMM(MatchPyramidBaseModel):
                 fm_char = 0.5 * (sum_squared - squared_sum)
 
                 # match pyramid
-                cross_char = self._interaction_feature_layer(enc_seq_char_left, enc_seq_char_right,
+                cross_char = self._mp_interaction_feature_layer(enc_seq_char_left, enc_seq_char_right,
                                                              self.dpool_index_char,
                                                              granularity="char")
 
