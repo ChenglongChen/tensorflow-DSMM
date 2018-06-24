@@ -13,7 +13,7 @@ class BCNNBaseModel(BaseModel):
     def _padding(self, x, name):
         # x: [batch, s, d, 1]
         # x => [batch, s+w*2-2, d, 1]
-        w = self.params["bcnn_filter_sizes"]
+        w = self.params["bcnn_filter_size"]
         return tf.pad(x, np.array([[0, 0], [w - 1, w - 1], [0, 0], [0, 0]]), "CONSTANT", name)
 
 
@@ -49,7 +49,7 @@ class BCNNBaseModel(BaseModel):
         conv = tf.layers.conv2d(
             inputs=x,
             filters=self.params["bcnn_num_filters"],
-            kernel_size=(self.params["bcnn_filter_sizes"], d),
+            kernel_size=(self.params["bcnn_filter_size"], d),
             padding="valid",
             activation=self.params["bcnn_activation"],
             strides=1,
@@ -70,12 +70,12 @@ class BCNNBaseModel(BaseModel):
             x2 = x
         w_ap = tf.layers.average_pooling2d(
             inputs=x2,
-            pool_size=(self.params["bcnn_filter_sizes"], 1),
+            pool_size=(self.params["bcnn_filter_size"], 1),
             strides=1,
             padding="valid",
             name=name)
         if attention is not None:
-            w_ap = w_ap * self.params["bcnn_filter_sizes"]
+            w_ap = w_ap * self.params["bcnn_filter_size"]
 
         return w_ap
 
@@ -85,7 +85,7 @@ class BCNNBaseModel(BaseModel):
             pool_width = seq_len
             d = self.params["embedding_dim"]
         else:
-            pool_width = seq_len + self.params["bcnn_filter_sizes"] - 1
+            pool_width = seq_len + self.params["bcnn_filter_size"] - 1
             d = self.params["bcnn_num_filters"]
 
         all_ap = tf.layers.average_pooling2d(
@@ -121,7 +121,7 @@ class BCNNBaseModel(BaseModel):
         return None, None, None, None
 
 
-    def _bcnn_interaction_feature_layer(self, enc_seq_left, enc_seq_right, granularity="word"):
+    def _interaction_feature_layer(self, enc_seq_left, enc_seq_right, granularity="word"):
         name = self.model_name + granularity
         seq_len = self.params["max_seq_len_%s"%granularity]
         # [batch, s, d] => [batch, s, d, 1]
@@ -151,7 +151,7 @@ class BCNNBaseModel(BaseModel):
                                                                     return_enc=True)
                 _, enc_seq_word_right = self._semantic_feature_layer(self.seq_word_right, granularity="word", reuse=True,
                                                                      return_enc=True)
-                sim_word = self._bcnn_interaction_feature_layer(enc_seq_word_left, enc_seq_word_right, granularity="word")
+                sim_word = self._interaction_feature_layer(enc_seq_word_left, enc_seq_word_right, granularity="word")
 
             with tf.name_scope("char_network"):
                 _, enc_seq_char_left = self._semantic_feature_layer(self.seq_char_left, granularity="char", reuse=False,
@@ -159,7 +159,7 @@ class BCNNBaseModel(BaseModel):
                 _, enc_seq_char_right = self._semantic_feature_layer(self.seq_char_right, granularity="char",
                                                                      reuse=True,
                                                                      return_enc=True)
-                sim_char = self._bcnn_interaction_feature_layer(enc_seq_char_left, enc_seq_char_right, granularity="char")
+                sim_char = self._interaction_feature_layer(enc_seq_char_left, enc_seq_char_right, granularity="char")
 
             with tf.name_scope("prediction"):
                 out_0 = tf.concat([sim_word, sim_char], axis=-1)

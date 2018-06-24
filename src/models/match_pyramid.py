@@ -20,13 +20,13 @@ class MatchPyramidBaseModel(BaseModel):
                                                name="dpool_index_char")
 
 
-    def _mp_interaction_feature_layer(self, enc_seq_left, enc_seq_right, dpool_index, granularity="word"):
+    def _interaction_feature_layer(self, enc_seq_left, enc_seq_right, dpool_index, granularity="word"):
         cross = tf.einsum("abd,acd->abc", enc_seq_left, enc_seq_right)
         cross = tf.expand_dims(cross, axis=3)
         cross_conv = tf.layers.conv2d(
             inputs=cross,
             filters=self.params["mp_num_filters"],
-            kernel_size=self.params["mp_filter_sizes"],
+            kernel_size=self.params["bcnn_filter_size"],
             padding="same",
             activation=self.params["mp_activation"],
             strides=1,
@@ -79,12 +79,12 @@ class MatchPyramid(MatchPyramidBaseModel):
             with tf.name_scope("word_network"):
                 sem_seq_word_left, enc_seq_word_left = self._semantic_feature_layer(self.seq_word_left, granularity="word", reuse=False, return_enc=True)
                 sem_seq_word_right, enc_seq_word_right = self._semantic_feature_layer(self.seq_word_right, granularity="word", reuse=True, return_enc=True)
-                cross_word = self._mp_interaction_feature_layer(enc_seq_word_left, enc_seq_word_right, self.dpool_index_word, granularity="word")
+                cross_word = self._interaction_feature_layer(enc_seq_word_left, enc_seq_word_right, self.dpool_index_word, granularity="word")
 
             with tf.name_scope("char_network"):
                 sem_seq_char_left, enc_seq_char_left = self._semantic_feature_layer(self.seq_char_left, granularity="char", reuse=False, return_enc=True)
                 sem_seq_char_right, enc_seq_char_right = self._semantic_feature_layer(self.seq_char_right, granularity="char", reuse=True, return_enc=True)
-                cross_char = self._mp_interaction_feature_layer(enc_seq_char_left, enc_seq_char_right,
+                cross_char = self._interaction_feature_layer(enc_seq_char_left, enc_seq_char_right,
                                                              self.dpool_index_char, granularity="char")
 
             with tf.name_scope("prediction"):

@@ -1,12 +1,14 @@
 
 import tensorflow as tf
 
+from models.bcnn import ABCNN3
 from models.match_pyramid import MatchPyramidBaseModel
 
 
-class DSMM(MatchPyramidBaseModel):
+class DSMM(MatchPyramidBaseModel, ABCNN3):
     def __init__(self, params, logger, init_embedding_matrix=None):
         super(DSMM, self).__init__(params, logger, init_embedding_matrix)
+
 
     def _build_model(self):
         with tf.name_scope(self.model_name):
@@ -32,7 +34,10 @@ class DSMM(MatchPyramidBaseModel):
                 fm_word = 0.5 * (sum_squared - squared_sum)
 
                 # match pyramid
-                cross_word = self._mp_interaction_feature_layer(enc_seq_word_left, enc_seq_word_right, self.dpool_index_word, granularity="word")
+                mp_word = self._interaction_feature_layer(enc_seq_word_left, enc_seq_word_right, self.dpool_index_word, granularity="word")
+
+                # abcnn
+                abcnn_word = super(ABCNN3, self)._interaction_feature_layer(enc_seq_word_left, enc_seq_word_right, granularity="word")
 
                 # dense
                 deep_in_word = tf.concat([sem_seq_word_left, sem_seq_word_right], axis=-1)
@@ -62,9 +67,13 @@ class DSMM(MatchPyramidBaseModel):
                 fm_char = 0.5 * (sum_squared - squared_sum)
 
                 # match pyramid
-                cross_char = self._mp_interaction_feature_layer(enc_seq_char_left, enc_seq_char_right,
+                mp_char = self._interaction_feature_layer(enc_seq_char_left, enc_seq_char_right,
                                                              self.dpool_index_char,
                                                              granularity="char")
+
+                # abcnn
+                abcnn_char = super(ABCNN3, self)._interaction_feature_layer(enc_seq_char_left, enc_seq_char_right,
+                                                                                  granularity="char")
 
                 # dense
                 deep_in_char = tf.concat([sem_seq_char_left, sem_seq_char_right], axis=-1)
@@ -76,8 +85,8 @@ class DSMM(MatchPyramidBaseModel):
 
             with tf.name_scope("prediction"):
                 out_0 = tf.concat([
-                    sim_word, diff_word, cross_word, deep_word,
-                    sim_char, diff_char, cross_char, deep_char,
+                    sim_word, diff_word, mp_word, abcnn_word, deep_word,
+                    sim_char, diff_char, mp_char, abcnn_char, deep_char,
                 ], axis=-1)
                 out = self._mlp_layer(out_0, fc_type=self.params["fc_type"],
                                       hidden_units=self.params["fc_hidden_units"],

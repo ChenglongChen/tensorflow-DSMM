@@ -77,7 +77,7 @@ params = {
 
     # match pyramid
     "mp_num_filters": 8,
-    "mp_filter_sizes": 3,
+    "mp_filter_size": 3,
     "mp_activation": tf.nn.relu,
     "mp_dynamic_pooling": False,
     "mp_pool_size_word": 4,
@@ -85,7 +85,7 @@ params = {
 
     # bcnn
     "bcnn_num_filters": 8,
-    "bcnn_filter_sizes": 3,
+    "bcnn_filter_size": 3,
     "bcnn_activation": tf.nn.tanh,
     "bcnn_match_score_type": "cosine", # euclidean/euclidean_exp produce nan
 }
