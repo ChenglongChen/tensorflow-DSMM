@@ -1,13 +1,13 @@
 
+import sys
+
 import config
 
 from inputs.data import load_question, load_train, load_test
-from inputs.data import word_embedding_matrix, char_embedding_matrix
+from inputs.data import init_embedding_matrix
 
 from utils import log_utils, os_utils, time_utils
-from models.dssm import DSSM, CDSSM
-from models.dsmm import DSMM
-from models.match_pyramid import MatchPyramid
+from models.model_library import get_model
 
 
 def get_model_data(dataset, params):
@@ -26,26 +26,25 @@ params = {
     "epoch": 20,
     "l2_lambda": 0.000,
 
+    # embedding
     "embedding_dropout": 0.2,
-    "embedding_dim_word": word_embedding_matrix.shape[1],
-    "embedding_dim_char": char_embedding_matrix.shape[1],
-    "embedding_dim": word_embedding_matrix.shape[1],
+    "embedding_dim_word": init_embedding_matrix["word"].shape[1],
+    "embedding_dim_char": init_embedding_matrix["char"].shape[1],
+    "embedding_dim": init_embedding_matrix["word"].shape[1],
     "embedding_trainable": True,
 
-    "max_num_word": word_embedding_matrix.shape[0],
-    "max_num_char": char_embedding_matrix.shape[0],
+    "max_num_word": init_embedding_matrix["word"].shape[0],
+    "max_num_char": init_embedding_matrix["char"].shape[0],
 
     "threshold": 0.217277,
     "calibration_factor": 1.0,
 
-    "max_sequence_length_word": 12,
-    "max_sequence_length_char": 20,
+    "max_seq_len_word": 12,
+    "max_seq_len_char": 20,
     "pad_sequences_padding": "post",
     "pad_sequences_truncating": "post",
 
-    "data1_psize": 3,
-    "data2_psize": 3,
-
+    # optimization
     "optimizer_type": "nadam",
     "init_lr": 0.001,
     "beta1": 0.975,
@@ -56,6 +55,7 @@ params = {
     "random_seed": 2018,
     "eval_every_num_update": 100,
 
+    # semantic feature layer
     "encode_method": "fasttext",
     "attend_method": "attention",
 
@@ -83,6 +83,10 @@ model_name = "semantic_matching"
 
 
 def main():
+    model_type = None
+    if len(sys.argv) > 1:
+        model_type = sys.argv[1]
+
     os_utils._makedirs("../logs")
     os_utils._makedirs("../output")
     logger = log_utils._get_logger("../logs", "tf-%s.log" % time_utils._timestamp())
@@ -100,11 +104,10 @@ def main():
     X_train = get_model_data(dfTrain[:train_num], params)
     X_valid = get_model_data(dfTrain[train_num:], params)
 
-    model = DSMM(model_name, params, logger, params["threshold"],
+    model = get_model(model_type)(model_name, params, logger, params["threshold"],
                                   params["calibration_factor"],
                                   training=True,
-                                  word_embedding_matrix=word_embedding_matrix,
-                                  char_embedding_matrix=char_embedding_matrix)
+                                  init_embedding_matrix=init_embedding_matrix)
     model.fit(X_train, Q, validation_data=X_valid, shuffle=True)
 
     dfTest = load_test()

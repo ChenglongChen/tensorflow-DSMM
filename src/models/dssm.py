@@ -5,10 +5,10 @@ from models.base_model import BaseModel
 
 
 class DSSMBaseModel(BaseModel):
-    def __init__(self, model_name, params, logger, threshold, calibration_factor, training=True,
-                 word_embedding_matrix=None, char_embedding_matrix=None):
+    def __init__(self, model_name, params, logger, threshold=0.5, calibration_factor=1., training=True,
+                 init_embedding_matrix=None):
         super(DSSMBaseModel, self).__init__(model_name, params, logger, threshold, calibration_factor, training,
-                                            word_embedding_matrix, char_embedding_matrix)
+                                            init_embedding_matrix)
 
 
     def _build_model(self):
@@ -39,7 +39,7 @@ class DSSMBaseModel(BaseModel):
                 loss = tf.reduce_mean(loss, name="log_loss")
                 if self.params["l2_lambda"] > 0:
                     l2_losses = tf.add_n(
-                        [tf.nn.l2_loss(v) for v in tf.trainable_variables() if 'bias' not in v.name]) * self.params[
+                        [tf.nn.l2_loss(v) for v in tf.trainable_variables() if "bias" not in v.name]) * self.params[
                                     "l2_lambda"]
                     loss = loss + l2_losses
 
@@ -47,8 +47,8 @@ class DSSMBaseModel(BaseModel):
 
 
 class DSSM(DSSMBaseModel):
-    def __init__(self, model_name, params, logger, threshold, calibration_factor, training=True,
-                 word_embedding_matrix=None, char_embedding_matrix=None):
+    def __init__(self, model_name, params, logger, threshold=0.5, calibration_factor=1., training=True,
+                 init_embedding_matrix=None):
         # model config
         params.update({
             "encode_method": "fasttext",
@@ -65,12 +65,12 @@ class DSSM(DSSMBaseModel):
             "fc_dropouts": [0, 0],
         })
         super(DSSM, self).__init__(model_name, params, logger, threshold, calibration_factor, training,
-                                            word_embedding_matrix, char_embedding_matrix)
+                                            init_embedding_matrix)
 
 
 class CDSSM(DSSMBaseModel):
-    def __init__(self, model_name, params, logger, threshold, calibration_factor, training=True,
-                 word_embedding_matrix=None, char_embedding_matrix=None):
+    def __init__(self, model_name, params, logger, threshold=0.5, calibration_factor=1., training=True,
+                 init_embedding_matrix=None):
         # model config
         params.update({
             "encode_method": "textcnn",
@@ -87,5 +87,5 @@ class CDSSM(DSSMBaseModel):
             "fc_dropouts": [0],
         })
         super(CDSSM, self).__init__(model_name, params, logger, threshold, calibration_factor, training,
-                                            word_embedding_matrix, char_embedding_matrix)
+                                            init_embedding_matrix)
 

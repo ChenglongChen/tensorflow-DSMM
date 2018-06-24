@@ -3,24 +3,23 @@ import tensorflow as tf
 
 from inputs.dynamic_pooling import dynamic_pooling_index
 from models.base_model import BaseModel
-from tf_common.nn_module import dense_block, resnet_block
 
 
 class MatchPyramidBaseModel(BaseModel):
-    def __init__(self, model_name, params, logger, threshold, calibration_factor, training=True,
-                 word_embedding_matrix=None, char_embedding_matrix=None):
+    def __init__(self, model_name, params, logger, threshold=0.5, calibration_factor=1., training=True,
+                 init_embedding_matrix=None):
         super(MatchPyramidBaseModel, self).__init__(model_name, params, logger, threshold, calibration_factor, training,
-                                            word_embedding_matrix, char_embedding_matrix)
+                                            init_embedding_matrix)
 
 
     def _init_tf_vars(self):
         super(MatchPyramidBaseModel, self)._init_tf_vars()
-        self.dpool_index_word = tf.placeholder(tf.int32, shape=[None, self.params["max_sequence_length_word"],
-                                                                self.params["max_sequence_length_word"], 3],
-                                               name='dpool_index_word')
-        self.dpool_index_char = tf.placeholder(tf.int32, shape=[None, self.params["max_sequence_length_char"],
-                                                                self.params["max_sequence_length_char"], 3],
-                                               name='dpool_index_char')
+        self.dpool_index_word = tf.placeholder(tf.int32, shape=[None, self.params["max_seq_len_word"],
+                                                                self.params["max_seq_len_word"], 3],
+                                               name="dpool_index_word")
+        self.dpool_index_char = tf.placeholder(tf.int32, shape=[None, self.params["max_seq_len_char"],
+                                                                self.params["max_seq_len_char"], 3],
+                                               name="dpool_index_char")
 
 
     def _interaction_feature_layer(self, enc_seq_left, enc_seq_right, dpool_index, granularity="word"):
@@ -40,11 +39,11 @@ class MatchPyramidBaseModel(BaseModel):
         pool_size = self.params["mp_pool_size_%s" % granularity]
         cross_pool = tf.layers.max_pooling2d(
             inputs=cross_conv,
-            pool_size=[self.params["max_sequence_length_%s" % granularity] / pool_size,
-                       self.params["max_sequence_length_%s" % granularity] / pool_size],
-            strides=[self.params["max_sequence_length_%s" % granularity] / pool_size,
-                     self.params["max_sequence_length_%s" % granularity] / pool_size],
-            padding='valid',
+            pool_size=[self.params["max_seq_len_%s" % granularity] / pool_size,
+                       self.params["max_seq_len_%s" % granularity] / pool_size],
+            strides=[self.params["max_seq_len_%s" % granularity] / pool_size,
+                     self.params["max_seq_len_%s" % granularity] / pool_size],
+            padding="valid",
             name="cross_pool_%s" % granularity)
 
         cross = tf.reshape(cross_pool, [-1, self.params["mp_num_filters"] * (pool_size * pool_size)])
@@ -57,12 +56,12 @@ class MatchPyramidBaseModel(BaseModel):
         if self.params["mp_dynamic_pooling"]:
             dpool_index_word = dynamic_pooling_index(feed_dict[self.seq_len_word_left],
                                                           feed_dict[self.seq_len_word_right],
-                                                          self.params["max_sequence_length_word"],
-                                                          self.params["max_sequence_length_word"])
+                                                          self.params["max_seq_len_word"],
+                                                          self.params["max_seq_len_word"])
             dpool_index_char = dynamic_pooling_index(feed_dict[self.seq_len_char_left],
                                                           feed_dict[self.seq_len_char_right],
-                                                          self.params["max_sequence_length_char"],
-                                                          self.params["max_sequence_length_char"])
+                                                          self.params["max_seq_len_char"],
+                                                          self.params["max_seq_len_char"])
             feed_dict.update({
                 self.dpool_index_word: dpool_index_word,
                 self.dpool_index_char: dpool_index_char,
@@ -71,10 +70,10 @@ class MatchPyramidBaseModel(BaseModel):
 
 
 class MatchPyramid(MatchPyramidBaseModel):
-    def __init__(self, model_name, params, logger, threshold, calibration_factor, training=True,
-                 word_embedding_matrix=None, char_embedding_matrix=None):
+    def __init__(self, model_name, params, logger, threshold=0.5, calibration_factor=1., training=True,
+                 init_embedding_matrix=None):
         super(MatchPyramid, self).__init__(model_name, params, logger, threshold, calibration_factor, training,
-                                            word_embedding_matrix, char_embedding_matrix)
+                                            init_embedding_matrix)
 
 
     def _build_model(self):
@@ -94,20 +93,11 @@ class MatchPyramid(MatchPyramidBaseModel):
 
             with tf.name_scope("prediction"):
                 out_0 = tf.concat([cross_word, cross_char], axis=-1)
-                hidden_units = self.params["fc_hidden_units"]
-                dropouts = self.params["fc_dropouts"]
-                if self.params["fc_type"] == "fc":
-                    out = dense_block(out_0, hidden_units=hidden_units, dropouts=dropouts, densenet=False,
-                                      scope_name=self.model_name + "mlp", reuse=False, training=self.training,
-                                      seed=self.params["random_seed"])
-                elif self.params["fc_type"] == "densenet":
-                    out = dense_block(out_0, hidden_units=hidden_units, dropouts=dropouts, densenet=True,
-                                      scope_name=self.model_name + "mlp", reuse=False, training=self.training,
-                                      seed=self.params["random_seed"])
-                elif self.params["fc_type"] == "resnet":
-                    out = resnet_block(out_0, hidden_units=hidden_units, dropouts=dropouts, cardinality=1,
-                                       dense_shortcut=True, training=self.training,
-                                       seed=self.params["random_seed"], scope_name=self.model_name + "mlp", reuse=False)
+                out = self._mlp_layer(out_0, fc_type=self.params["fc_type"],
+                                      hidden_units=self.params["fc_hidden_units"],
+                                      dropouts=self.params["fc_dropouts"],
+                                      scope_name=self.model_name + "mlp",
+                                      reuse=False)
                 logits = tf.layers.dense(out, 1, activation=None,
                                          kernel_initializer=tf.glorot_uniform_initializer(
                                              seed=self.params["random_seed"]),
@@ -120,7 +110,7 @@ class MatchPyramid(MatchPyramidBaseModel):
                 loss = tf.reduce_mean(loss, name="log_loss")
                 if self.params["l2_lambda"] > 0:
                     l2_losses = tf.add_n(
-                        [tf.nn.l2_loss(v) for v in tf.trainable_variables() if 'bias' not in v.name]) * self.params[
+                        [tf.nn.l2_loss(v) for v in tf.trainable_variables() if "bias" not in v.name]) * self.params[
                                     "l2_lambda"]
                     loss = loss + l2_losses
 

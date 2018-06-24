@@ -2,14 +2,13 @@
 import tensorflow as tf
 
 from models.match_pyramid import MatchPyramidBaseModel
-from tf_common.nn_module import dense_block, resnet_block
 
 
 class DSMM(MatchPyramidBaseModel):
-    def __init__(self, model_name, params, logger, threshold, calibration_factor, training=True,
-                 word_embedding_matrix=None, char_embedding_matrix=None):
+    def __init__(self, model_name, params, logger, threshold=0.5, calibration_factor=1., training=True,
+                 init_embedding_matrix=None):
         super(DSMM, self).__init__(model_name, params, logger, threshold, calibration_factor, training,
-                                            word_embedding_matrix, char_embedding_matrix)
+                                            init_embedding_matrix)
 
     def _build_model(self):
         with tf.name_scope(self.model_name):
@@ -26,7 +25,7 @@ class DSMM(MatchPyramidBaseModel):
                 sim_word = sem_seq_word_left * sem_seq_word_right
 
                 # diff
-                diff_word = tf.abs(sem_seq_word_left - sem_seq_word_right)
+                diff_word = tf.square(sem_seq_word_left - sem_seq_word_right)
 
                 # fm
                 tmp = tf.concat([enc_seq_word_left, enc_seq_word_right], axis=1)
@@ -39,21 +38,11 @@ class DSMM(MatchPyramidBaseModel):
 
                 # dense
                 deep_in_word = tf.concat([sem_seq_word_left, sem_seq_word_right], axis=-1)
-                hidden_units = self.params["fc_hidden_units"]
-                dropouts = self.params["fc_dropouts"]
-                if self.params["fc_type"] == "fc":
-                    deep_word = dense_block(deep_in_word, hidden_units=hidden_units, dropouts=dropouts, densenet=False,
-                                                scope_name=self.model_name + "deep_word", reuse=False,
-                                                training=self.training, seed=self.params["random_seed"])
-                elif self.params["fc_type"] == "densenet":
-                    deep_word = dense_block(deep_in_word, hidden_units=hidden_units, dropouts=dropouts, densenet=True,
-                                                scope_name=self.model_name + "deep_word", reuse=False,
-                                                training=self.training, seed=self.params["random_seed"])
-                elif self.params["fc_type"] == "resnet":
-                    deep_word = resnet_block(deep_in_word, hidden_units=hidden_units, dropouts=dropouts, cardinality=1,
-                                                 dense_shortcut=True, training=self.training,
-                                                 seed=self.params["random_seed"],
-                                                 scope_name=self.model_name + "deep_word", reuse=False)
+                deep_word = self._mlp_layer(deep_in_word, fc_type=self.params["fc_type"],
+                                            hidden_units=self.params["fc_hidden_units"],
+                                            dropouts=self.params["fc_dropouts"],
+                                            scope_name=self.model_name + "deep_word",
+                                            reuse=False)
 
             with tf.name_scope("char_network"):
                 sem_seq_char_left, enc_seq_char_left = self._semantic_feature_layer(self.seq_char_left, granularity="char", reuse=False, return_enc=True)
@@ -66,7 +55,7 @@ class DSMM(MatchPyramidBaseModel):
                 sim_char = sem_seq_char_left * sem_seq_char_right
 
                 # diff
-                diff_char = tf.abs(sem_seq_char_left - sem_seq_char_right)
+                diff_char = tf.square(sem_seq_char_left - sem_seq_char_right)
 
                 # fm
                 tmp = tf.concat([enc_seq_char_left, enc_seq_char_right], axis=1)
@@ -81,41 +70,22 @@ class DSMM(MatchPyramidBaseModel):
 
                 # dense
                 deep_in_char = tf.concat([sem_seq_char_left, sem_seq_char_right], axis=-1)
-                hidden_units = self.params["fc_hidden_units"]
-                dropouts = self.params["fc_dropouts"]
-                if self.params["fc_type"] == "fc":
-                    deep_char = dense_block(deep_in_char, hidden_units=hidden_units, dropouts=dropouts, densenet=False,
-                                                scope_name=self.model_name + "deep_char", reuse=False,
-                                                training=self.training, seed=self.params["random_seed"])
-                elif self.params["fc_type"] == "densenet":
-                    deep_char = dense_block(deep_in_char, hidden_units=hidden_units, dropouts=dropouts, densenet=True,
-                                                scope_name=self.model_name + "deep_char", reuse=False,
-                                                training=self.training, seed=self.params["random_seed"])
-                elif self.params["fc_type"] == "resnet":
-                    deep_char = resnet_block(deep_in_char, hidden_units=hidden_units, dropouts=dropouts, cardinality=1,
-                                                 dense_shortcut=True, training=self.training,
-                                                 seed=self.params["random_seed"],
-                                                 scope_name=self.model_name + "deep_char", reuse=False)
+                deep_char = self._mlp_layer(deep_in_char, fc_type=self.params["fc_type"],
+                                            hidden_units=self.params["fc_hidden_units"],
+                                            dropouts=self.params["fc_dropouts"],
+                                            scope_name=self.model_name + "deep_char",
+                                            reuse=False)
 
             with tf.name_scope("prediction"):
                 out_0 = tf.concat([
-                    sim_word, cross_word,
-                    sim_char, cross_char,
+                    sim_word, diff_word, cross_word, deep_word,
+                    sim_char, diff_char, cross_char, deep_char,
                 ], axis=-1)
-                hidden_units = self.params["fc_hidden_units"]
-                dropouts = self.params["fc_dropouts"]
-                if self.params["fc_type"] == "fc":
-                    out = dense_block(out_0, hidden_units=hidden_units, dropouts=dropouts, densenet=False,
-                                      scope_name=self.model_name + "mlp", reuse=False, training=self.training,
-                                      seed=self.params["random_seed"])
-                elif self.params["fc_type"] == "densenet":
-                    out = dense_block(out_0, hidden_units=hidden_units, dropouts=dropouts, densenet=True,
-                                      scope_name=self.model_name + "mlp", reuse=False, training=self.training,
-                                      seed=self.params["random_seed"])
-                elif self.params["fc_type"] == "resnet":
-                    out = resnet_block(out_0, hidden_units=hidden_units, dropouts=dropouts, cardinality=1,
-                                       dense_shortcut=True, training=self.training,
-                                       seed=self.params["random_seed"], scope_name=self.model_name + "mlp", reuse=False)
+                out = self._mlp_layer(out_0, fc_type=self.params["fc_type"],
+                                      hidden_units=self.params["fc_hidden_units"],
+                                      dropouts=self.params["fc_dropouts"],
+                                      scope_name=self.model_name + "mlp",
+                                      reuse=False)
                 logits = tf.layers.dense(out, 1, activation=None,
                                          kernel_initializer=tf.glorot_uniform_initializer(
                                              seed=self.params["random_seed"]),
@@ -128,7 +98,7 @@ class DSMM(MatchPyramidBaseModel):
                 loss = tf.reduce_mean(loss, name="log_loss")
                 if self.params["l2_lambda"] > 0:
                     l2_losses = tf.add_n(
-                        [tf.nn.l2_loss(v) for v in tf.trainable_variables() if 'bias' not in v.name]) * self.params[
+                        [tf.nn.l2_loss(v) for v in tf.trainable_variables() if "bias" not in v.name]) * self.params[
                                     "l2_lambda"]
                     loss = loss + l2_losses
 

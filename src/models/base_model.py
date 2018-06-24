@@ -12,15 +12,14 @@ from tf_common.nn_module import encode, attend
 
 
 class BaseModel(object):
-    def __init__(self, model_name, params, logger, threshold, calibration_factor, training=True,
-                 word_embedding_matrix=None, char_embedding_matrix=None):
+    def __init__(self, model_name, params, logger, threshold=0.5, calibration_factor=1., training=True,
+                 init_embedding_matrix=None):
         self.model_name = model_name
         self.params = params
         self.logger = logger
         self.threshold = threshold
         self.calibration_factor = calibration_factor
-        self.word_embedding_matrix = word_embedding_matrix
-        self.char_embedding_matrix = char_embedding_matrix
+        self.init_embedding_matrix = init_embedding_matrix
         self.calibration_model = None
         os_utils._makedirs(self.params["offline_model_dir"], force=training)
 
@@ -55,36 +54,47 @@ class BaseModel(object):
                                                         self.params["decay_steps"], self.params["decay_rate"])
 
 
+    def _get_embedding_matrix(self, granularity="word"):
+        if self.init_embedding_matrix[granularity] is None:
+            std = 0.1
+            minval = -std
+            maxval = std
+            emb_matrix = tf.Variable(
+                tf.random_uniform(
+                    [self.params["max_num_%s" % granularity] + 1, self.params["embedding_dim_%s" % granularity]],
+                    minval, maxval,
+                    seed=self.params["random_seed"],
+                    dtype=tf.float32))
+        else:
+            emb_matrix = tf.Variable(self.init_embedding_matrix[granularity],
+                                     trainable=self.params["embedding_trainable"])
+        return emb_matrix
+
+
+    def _mlp_layer(self, input, fc_type, hidden_units, dropouts, scope_name, reuse=False):
+        if fc_type == "fc":
+            output = dense_block(input, hidden_units=hidden_units, dropouts=dropouts,
+                                             densenet=False, scope_name=scope_name,
+                                             reuse=reuse,
+                                             training=self.training, seed=self.params["random_seed"])
+        elif fc_type == "densenet":
+            output = dense_block(input, hidden_units=hidden_units, dropouts=dropouts,
+                                             densenet=True, scope_name=scope_name,
+                                             reuse=reuse,
+                                             training=self.training, seed=self.params["random_seed"])
+        elif fc_type == "resnet":
+            output = resnet_block(input, hidden_units=hidden_units, dropouts=dropouts,
+                                              cardinality=1, dense_shortcut=True, training=self.training,
+                                              reuse=reuse,
+                                              seed=self.params["random_seed"],
+                                              scope_name=scope_name)
+        return output
+
+
     def _semantic_feature_layer(self, seq_input, granularity="word", reuse=False, return_enc=False):
         assert granularity in ["char", "word"]
         #### embed
-        if granularity == "word":
-            if self.word_embedding_matrix is None:
-                std = 0.1
-                minval = -std
-                maxval = std
-                emb_matrix = tf.Variable(
-                    tf.random_uniform([self.params["max_num_%s"%granularity] + 1, self.params["embedding_dim_%s"%granularity]],
-                                      minval, maxval,
-                                      seed=self.params["random_seed"],
-                                      dtype=tf.float32))
-            else:
-                emb_matrix = tf.Variable(self.word_embedding_matrix,
-                                              trainable=self.params["embedding_trainable"])
-        elif granularity == "char":
-            if self.char_embedding_matrix is None:
-                std = 0.1
-                minval = -std
-                maxval = std
-                emb_matrix = tf.Variable(
-                    tf.random_uniform([self.params["max_num_%s"%granularity] + 1, self.params["embedding_dim_%s"%granularity]],
-                                      minval, maxval,
-                                      seed=self.params["random_seed"],
-                                      dtype=tf.float32))
-            else:
-                emb_matrix = tf.Variable(self.char_embedding_matrix,
-                                              trainable=self.params["embedding_trainable"])
-
+        emb_matrix = self._get_embedding_matrix(granularity)
         emb_seq = tf.nn.embedding_lookup(emb_matrix, seq_input)
 
         #### dropout
@@ -106,24 +116,12 @@ class BaseModel(object):
                                    reuse=reuse)
 
         #### MLP nonlinear projection
-        hidden_units = self.params["fc_hidden_units"]
-        dropouts = self.params["fc_dropouts"]
-        if self.params["fc_type"] == "fc":
-            sem_seq = dense_block(att_seq, hidden_units=hidden_units, dropouts=dropouts,
-                                             densenet=False, scope_name=self.model_name + "sem_seq_%s"%granularity,
-                                             reuse=reuse,
-                                             training=self.training, seed=self.params["random_seed"])
-        elif self.params["fc_type"] == "densenet":
-            sem_seq = dense_block(att_seq, hidden_units=hidden_units, dropouts=dropouts,
-                                             densenet=True, scope_name=self.model_name + "sem_seq_%s"%granularity,
-                                             reuse=reuse,
-                                             training=self.training, seed=self.params["random_seed"])
-        elif self.params["fc_type"] == "resnet":
-            sem_seq = resnet_block(att_seq, hidden_units=hidden_units, dropouts=dropouts,
-                                              cardinality=1, dense_shortcut=True, training=self.training,
-                                              reuse=reuse,
-                                              seed=self.params["random_seed"],
-                                              scope_name=self.model_name + "sem_seq_%s"%granularity)
+        sem_seq = self._mlp_layer(att_seq, fc_type=self.params["fc_type"],
+                                  hidden_units=self.params["fc_hidden_units"],
+                                  dropouts=self.params["fc_dropouts"],
+                                  scope_name=self.model_name + "sem_seq_%s"%granularity,
+                                  reuse=reuse)
+
         if return_enc:
             return sem_seq, enc_seq
         else:
@@ -208,7 +206,6 @@ class BaseModel(object):
 
     def _get_feed_dict(self, X, idx, Q, construct_neg=False, training=False, symmetric=False):
         if training:
-
             if construct_neg:
                 q1 = X["q1"][idx]
                 q2 = X["q2"][idx]
@@ -269,17 +266,17 @@ class BaseModel(object):
                     self.seq_char_right: np.vstack([Q["chars"][q2],
                                                     Q["chars"][q1],
                                                     ]),
-                    self.seq_len_word_left: np.hstack([Q["sequence_length_word"][q1],
-                                                       Q["sequence_length_word"][q2],
+                    self.seq_len_word_left: np.hstack([Q["seq_len_word"][q1],
+                                                       Q["seq_len_word"][q2],
                                                        ]),
-                    self.seq_len_word_right: np.hstack([Q["sequence_length_word"][q2],
-                                                        Q["sequence_length_word"][q1],
+                    self.seq_len_word_right: np.hstack([Q["seq_len_word"][q2],
+                                                        Q["seq_len_word"][q1],
                                                         ]),
-                    self.seq_len_char_left: np.hstack([Q["sequence_length_char"][q1],
-                                                       Q["sequence_length_char"][q2],
+                    self.seq_len_char_left: np.hstack([Q["seq_len_char"][q1],
+                                                       Q["seq_len_char"][q2],
                                                        ]),
-                    self.seq_len_char_right: np.hstack([Q["sequence_length_char"][q2],
-                                                        Q["sequence_length_char"][q1],
+                    self.seq_len_char_right: np.hstack([Q["seq_len_char"][q2],
+                                                        Q["seq_len_char"][q1],
                                                         ]),
                     self.labels: np.hstack([X["label"][idx],
                                             X["label"][idx],
@@ -294,10 +291,10 @@ class BaseModel(object):
                 self.seq_word_right: Q["words"][q2],
                 self.seq_char_left: Q["chars"][q1],
                 self.seq_char_right: Q["chars"][q2],
-                self.seq_len_word_left: Q["sequence_length_word"][q1],
-                self.seq_len_word_right: Q["sequence_length_word"][q2],
-                self.seq_len_char_left: Q["sequence_length_char"][q1],
-                self.seq_len_char_right: Q["sequence_length_char"][q2],
+                self.seq_len_word_left: Q["seq_len_word"][q1],
+                self.seq_len_word_right: Q["seq_len_word"][q2],
+                self.seq_len_char_left: Q["seq_len_char"][q1],
+                self.seq_len_char_right: Q["seq_len_char"][q2],
                 self.labels: X["label"][idx],
                 self.training: training,
             }
@@ -317,17 +314,17 @@ class BaseModel(object):
                 self.seq_char_right: np.vstack([Q["chars"][q2],
                                                 Q["chars"][q1],
                                                 ]),
-                self.seq_len_word_left: np.hstack([Q["sequence_length_word"][q1],
-                                                   Q["sequence_length_word"][q2],
+                self.seq_len_word_left: np.hstack([Q["seq_len_word"][q1],
+                                                   Q["seq_len_word"][q2],
                                                    ]),
-                self.seq_len_word_right: np.hstack([Q["sequence_length_word"][q2],
-                                                    Q["sequence_length_word"][q1],
+                self.seq_len_word_right: np.hstack([Q["seq_len_word"][q2],
+                                                    Q["seq_len_word"][q1],
                                                     ]),
-                self.seq_len_char_left: np.hstack([Q["sequence_length_char"][q1],
-                                                   Q["sequence_length_char"][q2],
+                self.seq_len_char_left: np.hstack([Q["seq_len_char"][q1],
+                                                   Q["seq_len_char"][q2],
                                                    ]),
-                self.seq_len_char_right: np.hstack([Q["sequence_length_char"][q2],
-                                                    Q["sequence_length_char"][q1],
+                self.seq_len_char_right: np.hstack([Q["seq_len_char"][q2],
+                                                    Q["seq_len_char"][q1],
                                                     ]),
                 self.labels: np.hstack([X["label"][idx],
                                         X["label"][idx],
@@ -361,7 +358,7 @@ class BaseModel(object):
                     y_valid = validation_data["label"]
                     y_proba = self.predict_proba(validation_data, Q)
                     valid_loss = log_loss(y_valid, y_proba, eps=1e-15)
-                    # y_proba_cal = self.predict_calibration_proba(validation_data, Q)
+                    # y_proba_cal = self.predict_proba(validation_data, Q, calibration=True)
                     y_proba_cal = y_proba
                     valid_loss_cal = log_loss(y_valid, y_proba_cal, eps=1e-15)
                     self.logger.info(
@@ -374,17 +371,7 @@ class BaseModel(object):
                         lr, time.time() - start_time))
 
 
-    def predict_calibration_proba(self, X, Q):
-        y_logit = self.predict_logit(X, Q)
-        y_valid = X["label"]
-        if self.calibration_model is None:
-            self.calibration_model = LogisticRegression()
-            self.calibration_model.fit(y_logit, y_valid)
-        y_proba = self.calibration_model.predict_proba(y_logit)
-        return y_proba
-
-
-    def predict_logit(self, X, Q):
+    def _predict_node(self, X, Q, node):
         l = X["label"].shape[0]
         train_idx = np.arange(l)
         batches = self._get_batch_index(train_idx, self.params["batch_size"])
@@ -392,7 +379,7 @@ class BaseModel(object):
         y_pred_append = y_pred.append
         for idx in batches:
             feed_dict = self._get_feed_dict(X, idx, Q, training=False, symmetric=True)
-            pred = self.sess.run((self.logits), feed_dict=feed_dict)
+            pred = self.sess.run(node, feed_dict=feed_dict)
             n = int(pred.shape[0]/2)
             pred = (pred[:n] + pred[n:])/2.
             y_pred_append(pred)
@@ -400,20 +387,21 @@ class BaseModel(object):
         return y_pred
 
 
-    def predict_proba(self, X, Q):
-        l = X["label"].shape[0]
-        train_idx = np.arange(l)
-        batches = self._get_batch_index(train_idx, self.params["batch_size"])
-        y_pred = []
-        y_pred_append = y_pred.append
-        for idx in batches:
-            feed_dict = self._get_feed_dict(X, idx, Q, training=False, symmetric=True)
-            pred = self.sess.run((self.proba), feed_dict=feed_dict)
-            n = int(pred.shape[0] / 2)
-            pred = (pred[:n] + pred[n:]) / 2.
-            y_pred_append(pred)
-        y_pred = np.hstack(y_pred).reshape((-1, 1)).astype(np.float64)
-        return y_pred
+    def predict_logit(self, X, Q):
+        return self._predict_node(X, Q, self.logits)
+
+
+    def predict_proba(self, X, Q, calibration=False):
+        if calibration:
+            y_logit = self.predict_logit(X, Q)
+            y_valid = X["label"]
+            if self.calibration_model is None:
+                self.calibration_model = LogisticRegression()
+                self.calibration_model.fit(y_logit, y_valid)
+            y_proba = self.calibration_model.predict_proba(y_logit)
+            return y_proba
+        else:
+            return self._predict_node(X, Q, self.proba)
 
 
     def predict(self, X, Q):

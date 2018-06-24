@@ -15,12 +15,12 @@ def load_question(params):
     df["words"] = df.words.str.split(" ").apply(lambda x: [_to_ind(z) for z in x])
     df["chars"] = df.chars.str.split(" ").apply(lambda x: [_to_ind(z) for z in x])
     Q = {}
-    Q["sequence_length_word"] = sp.minimum(df["words"].apply(len).values, params["max_sequence_length_word"])
-    Q["sequence_length_char"] = sp.minimum(df["chars"].apply(len).values, params["max_sequence_length_char"])
-    Q["words"] = pad_sequences(df["words"], maxlen=params["max_sequence_length_word"],
+    Q["seq_len_word"] = sp.minimum(df["words"].apply(len).values, params["max_seq_len_word"])
+    Q["seq_len_char"] = sp.minimum(df["chars"].apply(len).values, params["max_seq_len_char"])
+    Q["words"] = pad_sequences(df["words"], maxlen=params["max_seq_len_word"],
                                              padding=params["pad_sequences_padding"],
                                              truncating=params["pad_sequences_truncating"])
-    Q["chars"] = pad_sequences(df["chars"], maxlen=params["max_sequence_length_char"],
+    Q["chars"] = pad_sequences(df["chars"], maxlen=params["max_seq_len_char"],
                                              padding=params["pad_sequences_padding"],
                                              truncating=params["pad_sequences_truncating"])
     return Q
@@ -64,3 +64,7 @@ def load_embedding_matrix(embedding_file):
 
 word_embedding_matrix = load_embedding_matrix(config.WORD_EMBEDDING_FILE)
 char_embedding_matrix = load_embedding_matrix(config.CHAR_EMBEDDING_FILE)
+init_embedding_matrix = {
+    "word": word_embedding_matrix,
+    "char": char_embedding_matrix,
+}
