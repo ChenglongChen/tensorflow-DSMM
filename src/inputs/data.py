@@ -10,6 +10,16 @@ def _to_ind(qid):
     return int(qid[1:])
 
 
+def load_raw_question():
+    df = pd.read_csv(config.QUESTION_FILE)
+    df["words"] = df.words.str.split(" ")
+    df["chars"] = df.chars.str.split(" ")
+    Q = {}
+    Q["words"] = df["words"].values
+    Q["chars"] = df["chars"].values
+    return Q
+
+
 def load_question(params):
     df = pd.read_csv(config.QUESTION_FILE)
     df["words"] = df.words.str.split(" ").apply(lambda x: [_to_ind(z) for z in x])
@@ -17,12 +27,16 @@ def load_question(params):
     Q = {}
     Q["seq_len_word"] = sp.minimum(df["words"].apply(len).values, params["max_seq_len_word"])
     Q["seq_len_char"] = sp.minimum(df["chars"].apply(len).values, params["max_seq_len_char"])
-    Q["words"] = pad_sequences(df["words"], maxlen=params["max_seq_len_word"],
-                                             padding=params["pad_sequences_padding"],
-                                             truncating=params["pad_sequences_truncating"])
-    Q["chars"] = pad_sequences(df["chars"], maxlen=params["max_seq_len_char"],
-                                             padding=params["pad_sequences_padding"],
-                                             truncating=params["pad_sequences_truncating"])
+    Q["words"] = pad_sequences(df["words"],
+                               maxlen=params["max_seq_len_word"],
+                               padding=params["pad_sequences_padding"],
+                               truncating=params["pad_sequences_truncating"],
+                               value=config.PADDING_INDEX_WORD)
+    Q["chars"] = pad_sequences(df["chars"],
+                               maxlen=params["max_seq_len_char"],
+                               padding=params["pad_sequences_padding"],
+                               truncating=params["pad_sequences_truncating"],
+                               value=config.PADDING_INDEX_CHAR)
     return Q
 
 
@@ -54,7 +68,8 @@ def load_embedding_matrix(embedding_file):
             line = f.readline()
     dim = len(v.split(" "))
 
-    emb_matrix = np.zeros((n, dim), dtype=float)
+    # add two index for missing and padding
+    emb_matrix = np.zeros((n+2, dim), dtype=float)
     for key ,val in d.items():
         v = np.asarray(val.split(" "), dtype=float)
         emb_matrix[key] = v
@@ -62,9 +77,7 @@ def load_embedding_matrix(embedding_file):
     return emb_matrix
 
 
-word_embedding_matrix = load_embedding_matrix(config.WORD_EMBEDDING_FILE)
-char_embedding_matrix = load_embedding_matrix(config.CHAR_EMBEDDING_FILE)
 init_embedding_matrix = {
-    "word": word_embedding_matrix,
-    "char": char_embedding_matrix,
+    "word": load_embedding_matrix(config.WORD_EMBEDDING_FILE),
+    "char": load_embedding_matrix(config.CHAR_EMBEDDING_FILE),
 }

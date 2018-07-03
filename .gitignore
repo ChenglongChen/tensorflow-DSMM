@@ -106,7 +106,12 @@ venv.bak/
 .idea
 __pycache__
 src/inputs/pair_generator.py
+src/models/stacking_model.py
+src/models/calibration.py
 tmp.py
 *.ipynb*
 weights
 *.sh
+run*
+*.csv
+features.py

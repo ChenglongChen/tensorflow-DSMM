@@ -1,4 +1,5 @@
 
+from copy import copy
 import tensorflow as tf
 
 from models.base_model import BaseModel
@@ -9,68 +10,144 @@ class DSSMBaseModel(BaseModel):
         super(DSSMBaseModel, self).__init__(params, logger, init_embedding_matrix)
 
 
-    def _build_model(self):
+    def _get_matching_features(self):
         with tf.name_scope(self.model_name):
             tf.set_random_seed(self.params["random_seed"])
 
             with tf.name_scope("word_network"):
-                sem_seq_word_left = self._semantic_feature_layer(self.seq_word_left, granularity="word", reuse=False)
-                sem_seq_word_right = self._semantic_feature_layer(self.seq_word_right, granularity="word", reuse=True)
-                sim_word = self._cosine_similarity(sem_seq_word_left, sem_seq_word_right)
+                if self.params["attend_method"] == "context-attention":
+                    emb_seq_word_left, enc_seq_word_left, att_seq_word_left, sem_seq_word_left, \
+                    emb_seq_word_right, enc_seq_word_right, att_seq_word_right, sem_seq_word_right = \
+                        self._interaction_semantic_feature_layer(
+                            self.seq_word_left,
+                            self.seq_word_right,
+                            self.seq_len_word_left,
+                            self.seq_len_word_right,
+                            granularity="word")
+                else:
+                    emb_seq_word_left, enc_seq_word_left, att_seq_word_left, sem_seq_word_left = \
+                        self._semantic_feature_layer(
+                            self.seq_word_left,
+                            self.seq_len_word_left,
+                            granularity="word", reuse=False)
+                    emb_seq_word_right, enc_seq_word_right, att_seq_word_right, sem_seq_word_right = \
+                        self._semantic_feature_layer(
+                            self.seq_word_right,
+                            self.seq_len_word_right,
+                            granularity="word", reuse=True)
+                if self.params["similarity_aggregation"]:
+                    sim_word = tf.concat([
+                        self._cosine_similarity(sem_seq_word_left, sem_seq_word_right),
+                        self._euclidean_distance(sem_seq_word_left, sem_seq_word_right),
+                        # self._canberra_score(sem_seq_word_left, sem_seq_word_right),
+                    ], axis=-1)
+                else:
+                    sim_word = tf.concat([
+                        sem_seq_word_left * sem_seq_word_right,
+                        tf.abs(sem_seq_word_left - sem_seq_word_right),
+                        # tf.abs(sem_seq_word_left - sem_seq_word_right) / (sem_seq_word_left + sem_seq_word_right),
+                    ], axis=-1)
 
             with tf.name_scope("char_network"):
-                sem_seq_char_left = self._semantic_feature_layer(self.seq_char_left, granularity="char", reuse=False)
-                sem_seq_char_right = self._semantic_feature_layer(self.seq_char_right, granularity="char", reuse=True)
-                sim_char = self._cosine_similarity(sem_seq_char_left, sem_seq_char_right)
+                if self.params["attend_method"] == "context-attention":
+                    emb_seq_char_left, enc_seq_char_left, att_seq_char_left, sem_seq_char_left, \
+                    emb_seq_char_right, enc_seq_char_right, att_seq_char_right, sem_seq_char_right = \
+                        self._interaction_semantic_feature_layer(
+                            self.seq_char_left,
+                            self.seq_char_right,
+                            self.seq_len_char_left,
+                            self.seq_len_char_right,
+                            granularity="char")
+                else:
+                    emb_seq_char_left, enc_seq_char_left, att_seq_char_left, sem_seq_char_left = \
+                        self._semantic_feature_layer(
+                            self.seq_char_left,
+                            self.seq_len_char_left,
+                            granularity="char", reuse=False)
+                    emb_seq_char_right, enc_seq_char_right, att_seq_char_right, sem_seq_char_right = \
+                        self._semantic_feature_layer(
+                            self.seq_char_right,
+                            self.seq_len_char_right,
+                            granularity="char", reuse=True)
+                if self.params["similarity_aggregation"]:
+                    sim_char = tf.concat([
+                        self._cosine_similarity(sem_seq_char_left, sem_seq_char_right),
+                        self._euclidean_distance(sem_seq_char_left, sem_seq_char_right),
+                        # self._canberra_score(sem_seq_char_left, sem_seq_char_right),
+                    ], axis=-1)
+                else:
+                    sim_char = tf.concat([
+                        sem_seq_char_left * sem_seq_char_right,
+                        tf.abs(sem_seq_char_left - sem_seq_char_right),
+                        # tf.abs(sem_seq_char_left - sem_seq_char_right) / (sem_seq_char_left + sem_seq_char_right),
+                    ], axis=-1)
 
-            with tf.name_scope("prediction"):
-                out = tf.concat([sim_word, sim_char], axis=-1)
-                logits = tf.layers.dense(out, 1, activation=None,
-                                         kernel_initializer=tf.glorot_uniform_initializer(
-                                             seed=self.params["random_seed"]),
-                                         name=self.model_name + "logits")
-                logits = tf.squeeze(logits, axis=1)
-                proba = tf.nn.sigmoid(logits)
+            with tf.name_scope("matching_features"):
+                matching_features = tf.concat([sim_word, sim_char], axis=-1)
 
-        return logits, proba
+        return matching_features
 
 
 class DSSM(DSSMBaseModel):
     def __init__(self, params, logger, init_embedding_matrix=None):
+        p = copy(params)
         # model config
-        params.update({
+        p.update({
+            "model_name": p["model_name"] + "dssm",
             "encode_method": "fasttext",
-            "attend_method": "ave",
-
-            # embedding dim
-            "embedding_dim_word": 300,
-            "embedding_dim_char": 300,
-            "embedding_dim": 300,
+            "attend_method": ["ave", "max", "min", "self-attention"],
 
             # fc block
             "fc_type": "fc",
-            "fc_hidden_units": [300, 128],
-            "fc_dropouts": [0, 0],
+            "fc_hidden_units": [64 * 4, 64 * 2, 64],
+            "fc_dropouts": [0, 0, 0],
         })
-        super(DSSM, self).__init__(params, logger, init_embedding_matrix)
+        super(DSSM, self).__init__(p, logger, init_embedding_matrix)
 
 
 class CDSSM(DSSMBaseModel):
     def __init__(self, params, logger, init_embedding_matrix=None):
+        p = copy(params)
         # model config
-        params.update({
+        p.update({
+            "model_name": p["model_name"] + "cdssm",
             "encode_method": "textcnn",
-            "attend_method": "max",
+            "attend_method": ["ave", "max", "min", "self-attention"],
 
             # cnn
-            "cnn_num_filters": 300,
-            "cnn_filter_sizes": [3],
+            "cnn_num_layers": 1,
+            "cnn_num_filters": 32,
+            "cnn_filter_sizes": [1, 2, 3],
             "cnn_timedistributed": False,
+            "cnn_activation": tf.nn.relu,
+            "cnn_gated_conv": True,
+            "cnn_residual": True,
 
             # fc block
             "fc_type": "fc",
-            "fc_hidden_units": [128],
-            "fc_dropouts": [0],
+            "fc_hidden_units": [64 * 4, 64 * 2, 64],
+            "fc_dropouts": [0, 0, 0],
         })
-        super(CDSSM, self).__init__(params, logger, init_embedding_matrix)
+        super(CDSSM, self).__init__(p, logger, init_embedding_matrix)
 
+
+class RDSSM(DSSMBaseModel):
+    def __init__(self, params, logger, init_embedding_matrix=None):
+        p = copy(params)
+        # model config
+        p.update({
+            "model_name": p["model_name"] + "rdssm",
+            "encode_method": "textbirnn",
+            "attend_method": ["ave", "max", "min", "self-attention"],
+
+            # rnn
+            "rnn_num_units": 32,
+            "rnn_cell_type": "gru",
+            "rnn_num_layers": 1,
+
+            # fc block
+            "fc_type": "fc",
+            "fc_hidden_units": [64 * 4, 64 * 2, 64],
+            "fc_dropouts": [0, 0, 0],
+        })
+        super(RDSSM, self).__init__(p, logger, init_embedding_matrix)

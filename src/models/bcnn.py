@@ -1,13 +1,25 @@
 
+from copy import copy
 import tensorflow as tf
 import numpy as np
 
+from inputs.dynamic_pooling import dynamic_pooling_index
 from models.base_model import BaseModel
 
 
 class BCNNBaseModel(BaseModel):
     def __init__(self, params, logger, init_embedding_matrix):
         super(BCNNBaseModel, self).__init__(params, logger, init_embedding_matrix)
+
+
+    def _init_tf_vars(self):
+        super(BCNNBaseModel, self)._init_tf_vars()
+        self.dpool_index_word = tf.placeholder(tf.int32, shape=[None, self.params["max_seq_len_word"],
+                                                                self.params["max_seq_len_word"], 3],
+                                               name="dpool_index_word")
+        self.dpool_index_char = tf.placeholder(tf.int32, shape=[None, self.params["max_seq_len_char"],
+                                                                self.params["max_seq_len_char"], 3],
+                                               name="dpool_index_char")
 
 
     def _padding(self, x, name):
@@ -17,7 +29,7 @@ class BCNNBaseModel(BaseModel):
         return tf.pad(x, np.array([[0, 0], [w - 1, w - 1], [0, 0], [0, 0]]), "CONSTANT", name)
 
 
-    def _make_attention_mat(self, x1, x2):
+    def _make_attention_matrix(self, x1, x2):
         # x1: [batch, s1, d, 1]
         # x2: [batch, s2, d, 1]
         # match score
@@ -60,7 +72,7 @@ class BCNNBaseModel(BaseModel):
         return tf.transpose(conv, perm=[0, 1, 3, 2])
 
 
-    def _attention_pooling(self, x, attention, name):
+    def _w_ap(self, x, attention, name):
         # x: [batch, s+w-1, d, 1]
         # attention: [batch, s+w-1]
         if attention is not None:
@@ -80,7 +92,7 @@ class BCNNBaseModel(BaseModel):
         return w_ap
 
 
-    def _global_pooling(self, x, seq_len, name):
+    def _all_ap(self, x, seq_len, name):
         if "input" in name:
             pool_width = seq_len
             d = self.params["embedding_dim"]
@@ -99,11 +111,9 @@ class BCNNBaseModel(BaseModel):
         return all_ap_reshaped
 
 
-    def _expand_input(self, x1, x2, seq_len, d, name):
+    def _expand_input(self, x1, x2, att_mat, seq_len, d, name):
+        # att_mat: [batch, s, s]
         aW = tf.get_variable(name=name, shape=(seq_len, d))
-
-        # [batch, s, s]
-        att_mat = self._make_attention_mat(x1, x2)
 
         # [batch, s, s] * [s,d] => [batch, s, d]
         # expand dims => [batch, s, d, 1]
@@ -117,152 +127,284 @@ class BCNNBaseModel(BaseModel):
         return x1, x2
 
 
-    def _cnn_layer(self, x1, x2, seq_len, d, name):
-        return None, None, None, None
+    def _bcnn_cnn_layer(self, x1, x2, seq_len, d, name, dpool_index, granularity="word"):
+        return None, None, None, None, None
 
 
-    def _interaction_feature_layer(self, enc_seq_left, enc_seq_right, granularity="word"):
+    def _mp_cnn_layer(self, cross, dpool_index, filters, kernel_size, pool_size, strides, name):
+        cross_conv = tf.layers.conv2d(
+            inputs=cross,
+            filters=filters,
+            kernel_size=kernel_size,
+            padding="same",
+            activation=self.params["bcnn_mp_activation"],
+            strides=1,
+            reuse=False,
+            name=name+"cross_conv")
+        if self.params["bcnn_mp_dynamic_pooling"] and dpool_index is not None:
+            cross_conv = tf.gather_nd(cross_conv, dpool_index)
+        cross_pool = tf.layers.max_pooling2d(
+            inputs=cross_conv,
+            pool_size=pool_size,
+            strides=strides,
+            padding="valid",
+            name=name+"cross_pool")
+        return cross_pool
+
+    def _interaction_feature_layer(self, seq_left, seq_right, dpool_index=None, granularity="word"):
         name = self.model_name + granularity
-        seq_len = self.params["max_seq_len_%s"%granularity]
+        seq_len = self.params["max_seq_len_%s" % granularity]
         # [batch, s, d] => [batch, s, d, 1]
-        enc_seq_left = tf.expand_dims(enc_seq_left, axis=-1)
-        enc_seq_right = tf.expand_dims(enc_seq_right, axis=-1)
+        seq_left = tf.expand_dims(seq_left, axis=-1)
+        seq_right = tf.expand_dims(seq_right, axis=-1)
 
-        LO_0 = self._global_pooling(x=enc_seq_left, seq_len=seq_len, name=name + "global_pooling_input_left")
-        RO_0 = self._global_pooling(x=enc_seq_right, seq_len=seq_len, name=name + "global_pooling_input_right")
+        left_ap_list = [None] * (self.params["bcnn_num_layers"] + 1)
+        right_ap_list = [None] * (self.params["bcnn_num_layers"] + 1)
+        left_ap_list[0] = self._all_ap(x=seq_left, seq_len=seq_len, name=name + "global_pooling_input_left")
+        right_ap_list[0] = self._all_ap(x=seq_right, seq_len=seq_len, name=name + "global_pooling_input_right")
 
-        LI_1, LO_1, RI_1, RO_1 = self._cnn_layer(x1=enc_seq_left, x2=enc_seq_right, seq_len=seq_len,
-                                                 d=self.params["embedding_dim"], name=name + "cnn_layer_1")
-        sims = [self._cosine_similarity(LO_0, RO_0), self._cosine_similarity(LO_1, RO_1)]
+        x1 = seq_left
+        x2 = seq_right
+        d = self.params["embedding_dim"]
+        outputs = []
+        for layer in range(self.params["bcnn_num_layers"]):
+            x1, left_ap_list[layer + 1], x2, right_ap_list[layer + 1], att_pooled = self._bcnn_cnn_layer(x1=x1, x2=x2,
+                                                                                                         seq_len=seq_len,
+                                                                                                         d=d,
+                                                                                                         name=name + "cnn_layer_%d" % (
+                                                                                                                 layer + 1),
+                                                                                                         dpool_index=dpool_index,
+                                                                                                         granularity=granularity)
+            d = self.params["bcnn_num_filters"]
+            if self.params["bcnn_mp_att_pooling"] and att_pooled is not None:
+                outputs.append(att_pooled)
 
-        _, LO_2, _, RO_2 = self._cnn_layer(x1=LI_1, x2=RI_1, seq_len=seq_len,
-                                           d=self.params["bcnn_num_filters"],
-                                           name=name + "cnn_layer_2")
-        sims.append(self._cosine_similarity(LO_2, RO_2))
-        return tf.concat(sims, axis=-1)
+        if self.params["similarity_aggregation"]:
+            for l, r in zip(left_ap_list, right_ap_list):
+                outputs.append(self._cosine_similarity(l, r))
+                outputs.append(self._euclidean_distance(l, r))
+                # outputs.append(self._canberra_score(l, r))
+        else:
+            for l, r in zip(left_ap_list, right_ap_list):
+                outputs.append(l * r)
+                outputs.append(tf.abs(l - r))
+                # outputs.append(tf.abs(l - r)/(l+r))
+        return tf.concat(outputs, axis=-1)
 
 
-    def _build_model(self):
+    def _get_attention_matrix_pooled_features(self, att_mat, seq_len, dpool_index, granularity, name):
+        # get attention matrix pooled features (as in sec. 5.3.1)
+        att_mat0 = tf.expand_dims(att_mat, axis=3)
+        # conv-pool layer 1
+        filters = self.params["bcnn_mp_num_filters"][0]
+        kernel_size = self.params["bcnn_mp_filter_sizes"][0]
+        # seq_len = seq_len + self.params["bcnn_filter_size"] - 1
+        pool_size0 = self.params["bcnn_mp_pool_sizes_%s" % granularity][0]
+        pool_sizes = [seq_len / pool_size0, seq_len / pool_size0]
+        strides = [seq_len / pool_size0, seq_len / pool_size0]
+        conv1 = self._mp_cnn_layer(att_mat0, dpool_index, filters, kernel_size, pool_sizes, strides,
+                                   name=self.model_name + name + granularity + "1")
+        conv1_flatten = tf.reshape(conv1, [-1, self.params["mp_num_filters"][0] * (pool_size0 * pool_size0)])
+
+        # conv-pool layer 2
+        filters = self.params["bcnn_mp_num_filters"][1]
+        kernel_size = self.params["bcnn_mp_filter_sizes"][1]
+        pool_size1 = self.params["bcnn_mp_pool_sizes_%s" % granularity][1]
+        pool_sizes = [pool_size0 / pool_size1, pool_size0 / pool_size1]
+        strides = [pool_size0 / pool_size1, pool_size0 / pool_size1]
+        conv2 = self._mp_cnn_layer(conv1, None, filters, kernel_size, pool_sizes, strides,
+                                   name=self.model_name + name + granularity + "2")
+        conv2_flatten = tf.reshape(conv2, [-1, self.params["mp_num_filters"][1] * (pool_size1 * pool_size1)])
+
+        return conv2_flatten
+
+
+    def _get_feed_dict(self, X, idx, Q, construct_neg=False, training=False, symmetric=False):
+        feed_dict = super(BCNNBaseModel, self)._get_feed_dict(X, idx, Q, construct_neg, training, symmetric)
+        if self.params["mp_dynamic_pooling"]:
+            dpool_index_word = dynamic_pooling_index(feed_dict[self.seq_len_word_left],
+                                                          feed_dict[self.seq_len_word_right],
+                                                          self.params["max_seq_len_word"],
+                                                          self.params["max_seq_len_word"])
+            dpool_index_char = dynamic_pooling_index(feed_dict[self.seq_len_char_left],
+                                                          feed_dict[self.seq_len_char_right],
+                                                          self.params["max_seq_len_char"],
+                                                          self.params["max_seq_len_char"])
+            feed_dict.update({
+                self.dpool_index_word: dpool_index_word,
+                self.dpool_index_char: dpool_index_char,
+            })
+        return feed_dict
+
+
+    def _get_matching_features(self):
         with tf.name_scope(self.model_name):
             tf.set_random_seed(self.params["random_seed"])
 
             with tf.name_scope("word_network"):
-                _, enc_seq_word_left = self._semantic_feature_layer(self.seq_word_left, granularity="word", reuse=False,
-                                                                    return_enc=True)
-                _, enc_seq_word_right = self._semantic_feature_layer(self.seq_word_right, granularity="word", reuse=True,
-                                                                     return_enc=True)
-                sim_word = self._interaction_feature_layer(enc_seq_word_left, enc_seq_word_right, granularity="word")
+                if self.params["attend_method"] == "context-attention":
+                    emb_seq_word_left, enc_seq_word_left, att_seq_word_left, sem_seq_word_left, \
+                    emb_seq_word_right, enc_seq_word_right, att_seq_word_right, sem_seq_word_right = \
+                        self._interaction_semantic_feature_layer(
+                            self.seq_word_left,
+                            self.seq_word_right,
+                            self.seq_len_word_left,
+                            self.seq_len_word_right,
+                            granularity="word")
+                else:
+                    emb_seq_word_left, enc_seq_word_left, att_seq_word_left, sem_seq_word_left = \
+                        self._semantic_feature_layer(
+                            self.seq_word_left,
+                            self.seq_len_word_left,
+                            granularity="word", reuse=False)
+                    emb_seq_word_right, enc_seq_word_right, att_seq_word_right, sem_seq_word_right = \
+                        self._semantic_feature_layer(
+                            self.seq_word_right,
+                            self.seq_len_word_right,
+                            granularity="word", reuse=True)
+                sim_word = self._interaction_feature_layer(emb_seq_word_left, emb_seq_word_right, self.dpool_index_word, granularity="word")
 
             with tf.name_scope("char_network"):
-                _, enc_seq_char_left = self._semantic_feature_layer(self.seq_char_left, granularity="char", reuse=False,
-                                                                    return_enc=True)
-                _, enc_seq_char_right = self._semantic_feature_layer(self.seq_char_right, granularity="char",
-                                                                     reuse=True,
-                                                                     return_enc=True)
-                sim_char = self._interaction_feature_layer(enc_seq_char_left, enc_seq_char_right, granularity="char")
+                if self.params["attend_method"] == "context-attention":
+                    emb_seq_char_left, enc_seq_char_left, att_seq_char_left, sem_seq_char_left, \
+                    emb_seq_char_right, enc_seq_char_right, att_seq_char_right, sem_seq_char_right = \
+                        self._interaction_semantic_feature_layer(
+                            self.seq_char_left,
+                            self.seq_char_right,
+                            self.seq_len_char_left,
+                            self.seq_len_char_right,
+                            granularity="char")
+                else:
+                    emb_seq_char_left, enc_seq_char_left, att_seq_char_left, sem_seq_char_left = \
+                        self._semantic_feature_layer(
+                            self.seq_char_left,
+                            self.seq_len_char_left,
+                            granularity="char", reuse=False)
+                    emb_seq_char_right, enc_seq_char_right, att_seq_char_right, sem_seq_char_right = \
+                        self._semantic_feature_layer(
+                            self.seq_char_right,
+                            self.seq_len_char_right,
+                            granularity="char", reuse=True)
+                sim_char = self._interaction_feature_layer(emb_seq_char_left, emb_seq_char_right, self.dpool_index_char, granularity="char")
 
-            with tf.name_scope("prediction"):
-                out_0 = tf.concat([sim_word, sim_char], axis=-1)
-                out = self._mlp_layer(out_0, fc_type=self.params["fc_type"],
-                                      hidden_units=self.params["fc_hidden_units"],
-                                      dropouts=self.params["fc_dropouts"],
-                                      scope_name=self.model_name + "mlp",
-                                      reuse=False)
-                logits = tf.layers.dense(out, 1, activation=None,
-                                         kernel_initializer=tf.glorot_uniform_initializer(
-                                             seed=self.params["random_seed"]),
-                                         name=self.model_name + "logits")
-                logits = tf.squeeze(logits, axis=1)
-                proba = tf.nn.sigmoid(logits)
+            with tf.name_scope("matching_features"):
+                matching_features = tf.concat([sim_word, sim_char], axis=-1)
 
-        return logits, proba
+        return matching_features
 
 
 class BCNN(BCNNBaseModel):
     def __init__(self, params, logger, init_embedding_matrix):
-        super(BCNN, self).__init__(params, logger, init_embedding_matrix)
+        p = copy(params)
+        p["model_name"] = p["model_name"] + "bcnn"
+        super(BCNN, self).__init__(p, logger, init_embedding_matrix)
 
 
-    def _cnn_layer(self, x1, x2, seq_len, d, name):
+    def _bcnn_cnn_layer(self, x1, x2, seq_len, d, name, dpool_index=None, granularity="word"):
         # x1, x2 = [batch, s, d, 1]
+        # att_mat0: [batch, s, s]
+        att_mat0 = self._make_attention_matrix(x1, x2)
         left_conv = self._convolution(x=self._padding(x1, name=name+"padding_left"), d=d, name=name+"conv", reuse=False)
         right_conv = self._convolution(x=self._padding(x2, name=name+"padding_right"), d=d, name=name+"conv", reuse=True)
 
         left_attention, right_attention = None, None
 
-        left_wp = self._attention_pooling(x=left_conv, attention=left_attention, name=name+"attention_pooling_left")
-        left_ap = self._global_pooling(x=left_conv, seq_len=seq_len, name=name+"global_pooling_left")
-        right_wp = self._attention_pooling(x=right_conv, attention=right_attention, name=name+"attention_pooling_right")
-        right_ap = self._global_pooling(x=right_conv, seq_len=seq_len, name=name+"global_pooling_right")
+        left_wp = self._w_ap(x=left_conv, attention=left_attention, name=name+"attention_pooling_left")
+        left_ap = self._all_ap(x=left_conv, seq_len=seq_len, name=name+"global_pooling_left")
+        right_wp = self._w_ap(x=right_conv, attention=right_attention, name=name+"attention_pooling_right")
+        right_ap = self._all_ap(x=right_conv, seq_len=seq_len, name=name+"global_pooling_right")
 
-        return left_wp, left_ap, right_wp, right_ap
+        # get attention matrix pooled features (as in sec. 5.3.1)
+        att_mat0_pooled = self._get_attention_matrix_pooled_features(att_mat0, seq_len, dpool_index, granularity, name+"att_pooled")
+
+        return left_wp, left_ap, right_wp, right_ap, att_mat0_pooled
 
 
 class ABCNN1(BCNNBaseModel):
     def __init__(self, params, logger, init_embedding_matrix):
-        super(ABCNN1, self).__init__(params, logger, init_embedding_matrix)
+        p = copy(params)
+        p["model_name"] = p["model_name"] + "abcnn1"
+        super(ABCNN1, self).__init__(p, logger, init_embedding_matrix)
 
 
-    def _cnn_layer(self, x1, x2, seq_len, d, name):
+    def _bcnn_cnn_layer(self, x1, x2, seq_len, d, name, dpool_index=None, granularity="word"):
         # x1, x2 = [batch, s, d, 1]
-        x1, x2 = self._expand_input(x1, x2, seq_len, d, name=name+"expand_input")
+        # att_mat0: [batch, s, s]
+        att_mat0 = self._make_attention_matrix(x1, x2)
+        x1, x2 = self._expand_input(x1, x2, att_mat0, seq_len, d, name=name+"expand_input")
 
         left_conv = self._convolution(x=self._padding(x1, name=name+"padding_left"), d=d, name=name+"conv", reuse=False)
         right_conv = self._convolution(x=self._padding(x2, name=name+"padding_right"), d=d, name=name+"conv", reuse=True)
 
         left_attention, right_attention = None, None
 
-        left_wp = self._attention_pooling(x=left_conv, attention=left_attention, name=name+"attention_pooling_left")
-        left_ap = self._global_pooling(x=left_conv, seq_len=seq_len, name=name+"global_pooling_left")
-        right_wp = self._attention_pooling(x=right_conv, attention=right_attention, name=name+"attention_pooling_right")
-        right_ap = self._global_pooling(x=right_conv, seq_len=seq_len, name=name+"global_pooling_right")
+        left_wp = self._w_ap(x=left_conv, attention=left_attention, name=name+"attention_pooling_left")
+        left_ap = self._all_ap(x=left_conv, seq_len=seq_len, name=name+"global_pooling_left")
+        right_wp = self._w_ap(x=right_conv, attention=right_attention, name=name+"attention_pooling_right")
+        right_ap = self._all_ap(x=right_conv, seq_len=seq_len, name=name+"global_pooling_right")
 
-        return left_wp, left_ap, right_wp, right_ap
+        # get attention matrix pooled features (as in sec. 5.3.1)
+        att_mat0_pooled = self._get_attention_matrix_pooled_features(att_mat0, seq_len, dpool_index, granularity, name+"att_pooled")
+
+        return left_wp, left_ap, right_wp, right_ap, att_mat0_pooled
 
 
 class ABCNN2(BCNNBaseModel):
     def __init__(self, params, logger, init_embedding_matrix):
-        super(ABCNN2, self).__init__(params, logger, init_embedding_matrix)
+        p = copy(params)
+        p["model_name"] = p["model_name"] + "abcnn2"
+        super(ABCNN2, self).__init__(p, logger, init_embedding_matrix)
 
 
-    def _cnn_layer(self, x1, x2, seq_len, d, name):
+    def _bcnn_cnn_layer(self, x1, x2, seq_len, d, name, dpool_index=None, granularity="word"):
         # x1, x2 = [batch, s, d, 1]
+        att_mat0 = self._make_attention_matrix(x1, x2)
         left_conv = self._convolution(x=self._padding(x1, name=name+"padding_left"), d=d, name=name+"conv", reuse=False)
         right_conv = self._convolution(x=self._padding(x2, name=name+"padding_right"), d=d, name=name+"conv", reuse=True)
 
         # [batch, s+w-1, s+w-1]
-        att_mat = self._make_attention_mat(left_conv, right_conv)
+        att_mat1 = self._make_attention_matrix(left_conv, right_conv)
         # [batch, s+w-1], [batch, s+w-1]
-        left_attention, right_attention = tf.reduce_sum(att_mat, axis=2), tf.reduce_sum(att_mat, axis=1)
+        left_attention, right_attention = tf.reduce_sum(att_mat1, axis=2), tf.reduce_sum(att_mat1, axis=1)
 
-        left_wp = self._attention_pooling(x=left_conv, attention=left_attention, name=name+"attention_pooling_left")
-        left_ap = self._global_pooling(x=left_conv, seq_len=seq_len, name=name+"global_pooling_left")
-        right_wp = self._attention_pooling(x=right_conv, attention=right_attention, name=name+"attention_pooling_right")
-        right_ap = self._global_pooling(x=right_conv, seq_len=seq_len, name=name+"global_pooling_right")
+        left_wp = self._w_ap(x=left_conv, attention=left_attention, name=name+"attention_pooling_left")
+        left_ap = self._all_ap(x=left_conv, seq_len=seq_len, name=name+"global_pooling_left")
+        right_wp = self._w_ap(x=right_conv, attention=right_attention, name=name+"attention_pooling_right")
+        right_ap = self._all_ap(x=right_conv, seq_len=seq_len, name=name+"global_pooling_right")
 
-        return left_wp, left_ap, right_wp, right_ap
+        # get attention matrix pooled features (as in sec. 5.3.1)
+        att_mat0_pooled = self._get_attention_matrix_pooled_features(att_mat0, seq_len, dpool_index, granularity, name+"att_pooled")
+
+        return left_wp, left_ap, right_wp, right_ap, att_mat0_pooled
 
 
 class ABCNN3(BCNNBaseModel):
     def __init__(self, params, logger, init_embedding_matrix):
-        super(ABCNN3, self).__init__(params, logger, init_embedding_matrix)
+        p = copy(params)
+        p["model_name"] = p["model_name"] + "abcnn3"
+        super(ABCNN3, self).__init__(p, logger, init_embedding_matrix)
 
 
-    def _cnn_layer(self, x1, x2, seq_len, d, name):
+    def _bcnn_cnn_layer(self, x1, x2, seq_len, d, name, dpool_index=None, granularity="word"):
         # x1, x2 = [batch, s, d, 1]
-        x1, x2 = self._expand_input(x1, x2, seq_len, d, name=name + "expand_input")
+        # att_mat0: [batch, s, s
+        att_mat0 = self._make_attention_matrix(x1, x2)
+        x1, x2 = self._expand_input(x1, x2, att_mat0, seq_len, d, name=name + "expand_input")
 
         left_conv = self._convolution(x=self._padding(x1, name=name+"padding_left"), d=d, name=name+"conv", reuse=False)
         right_conv = self._convolution(x=self._padding(x2, name=name+"padding_right"), d=d, name=name+"conv", reuse=True)
 
         # [batch, s+w-1, s+w-1]
-        att_mat = self._make_attention_mat(left_conv, right_conv)
+        att_mat1 = self._make_attention_matrix(left_conv, right_conv)
         # [batch, s+w-1], [batch, s+w-1]
-        left_attention, right_attention = tf.reduce_sum(att_mat, axis=2), tf.reduce_sum(att_mat, axis=1)
+        left_attention, right_attention = tf.reduce_sum(att_mat1, axis=2), tf.reduce_sum(att_mat1, axis=1)
 
-        left_wp = self._attention_pooling(x=left_conv, attention=left_attention, name=name+"attention_pooling_left")
-        left_ap = self._global_pooling(x=left_conv, seq_len=seq_len, name=name+"global_pooling_left")
-        right_wp = self._attention_pooling(x=right_conv, attention=right_attention, name=name+"attention_pooling_right")
-        right_ap = self._global_pooling(x=right_conv, seq_len=seq_len, name=name+"global_pooling_right")
+        left_wp = self._w_ap(x=left_conv, attention=left_attention, name=name+"attention_pooling_left")
+        left_ap = self._all_ap(x=left_conv, seq_len=seq_len, name=name+"global_pooling_left")
+        right_wp = self._w_ap(x=right_conv, attention=right_attention, name=name+"attention_pooling_right")
+        right_ap = self._all_ap(x=right_conv, seq_len=seq_len, name=name+"global_pooling_right")
 
-        return left_wp, left_ap, right_wp, right_ap
+        # get attention matrix pooled features (as in sec. 5.3.1)
+        att_mat0_pooled = self._get_attention_matrix_pooled_features(att_mat0, seq_len, dpool_index, granularity, name+"att_pooled")
+
+        return left_wp, left_ap, right_wp, right_ap, att_mat0_pooled
