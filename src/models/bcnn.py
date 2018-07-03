@@ -152,7 +152,7 @@ class BCNNBaseModel(BaseModel):
             name=name+"cross_pool")
         return cross_pool
 
-    def _interaction_feature_layer(self, seq_left, seq_right, dpool_index=None, granularity="word"):
+    def _bcnn_semantic_feature_layer(self, seq_left, seq_right, dpool_index=None, granularity="word"):
         name = self.model_name + granularity
         seq_len = self.params["max_seq_len_%s" % granularity]
         # [batch, s, d] => [batch, s, d, 1]
@@ -257,7 +257,7 @@ class BCNNBaseModel(BaseModel):
                             self.seq_word_right,
                             self.seq_len_word_right,
                             granularity="word", reuse=True)
-                sim_word = self._interaction_feature_layer(emb_seq_word_left, emb_seq_word_right, self.dpool_index_word, granularity="word")
+                sim_word = self._bcnn_semantic_feature_layer(emb_seq_word_left, emb_seq_word_right, self.dpool_index_word, granularity="word")
 
             with tf.name_scope("char_network"):
                 if self.params["attend_method"] == "context-attention":
@@ -280,7 +280,7 @@ class BCNNBaseModel(BaseModel):
                             self.seq_char_right,
                             self.seq_len_char_right,
                             granularity="char", reuse=True)
-                sim_char = self._interaction_feature_layer(emb_seq_char_left, emb_seq_char_right, self.dpool_index_char, granularity="char")
+                sim_char = self._bcnn_semantic_feature_layer(emb_seq_char_left, emb_seq_char_right, self.dpool_index_char, granularity="char")
 
             with tf.name_scope("matching_features"):
                 matching_features = tf.concat([sim_word, sim_char], axis=-1)

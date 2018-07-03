@@ -54,18 +54,21 @@ class DSMM(MatchPyramidBaseModel, ESIMBaseModel, BCNN):
                 match_matrix_word = self._get_match_matrix(self.seq_word_left, emb_seq_word_left, enc_seq_word_left,
                                                            self.seq_word_right, emb_seq_word_right, enc_seq_word_right,
                                                            granularity="word")
-                mp_word = self._interaction_feature_layer(match_matrix_word, self.dpool_index_word,
-                                                             granularity="word")
+                mp_word = self._mp_semantic_feature_layer(match_matrix_word,
+                                                          self.dpool_index_word,
+                                                          granularity="word")
 
                 # esim
-                esim_word = super(ESIMBaseModel, self)._interaction_semantic_feature_layer(self.seq_word_left,
-                                                                                           self.seq_word_right,
-                                                                                           self.seq_len_word_left,
-                                                                                           self.seq_len_word_right,
-                                                                                           granularity="word")
+                esim_word = self._esim_semantic_feature_layer(emb_seq_word_left,
+                                                              emb_seq_word_right,
+                                                              self.seq_len_word_left,
+                                                              self.seq_len_word_right,
+                                                              granularity="word")
 
-                # abcnn
-                abcnn_word = super(BCNN, self)._interaction_feature_layer(emb_seq_word_left, emb_seq_word_right, granularity="word")
+                # bcnn
+                bcnn_word = self._bcnn_semantic_feature_layer(emb_seq_word_left,
+                                                              emb_seq_word_right,
+                                                              granularity="word")
 
                 # dense
                 deep_in_word = tf.concat([sem_seq_word_left, sem_seq_word_right], axis=-1)
@@ -109,17 +112,21 @@ class DSMM(MatchPyramidBaseModel, ESIMBaseModel, BCNN):
                 match_matrix_char = self._get_match_matrix(self.seq_char_left, emb_seq_char_left, enc_seq_char_left,
                                                            self.seq_char_right, emb_seq_char_right, enc_seq_char_right,
                                                            granularity="char")
-                mp_char = self._interaction_feature_layer(match_matrix_char, self.dpool_index_char,
-                                                             granularity="char")
+                mp_char = self._mp_semantic_feature_layer(match_matrix_char,
+                                                          self.dpool_index_char,
+                                                          granularity="char")
 
                 # esim
-                esim_char = super(ESIMBaseModel, self)._interaction_semantic_feature_layer(self.seq_char_left, self.seq_char_right,
-                                                                                           self.seq_len_char_left, self.seq_len_char_right,
-                                                                                           granularity="char")
+                esim_char = self._esim_semantic_feature_layer(emb_seq_char_left,
+                                                              emb_seq_char_right,
+                                                              self.seq_len_char_left,
+                                                              self.seq_len_char_right,
+                                                              granularity="char")
 
-                # abcnn
-                abcnn_char = super(BCNN, self)._interaction_feature_layer(emb_seq_char_left, emb_seq_char_right,
-                                                                                  granularity="char")
+                # bcnn
+                bcnn_char = self._bcnn_semantic_feature_layer(emb_seq_char_left,
+                                                              emb_seq_char_right,
+                                                              granularity="char")
 
                 # dense
                 deep_in_char = tf.concat([sem_seq_char_left, sem_seq_char_right], axis=-1)
@@ -131,8 +138,8 @@ class DSMM(MatchPyramidBaseModel, ESIMBaseModel, BCNN):
 
             with tf.name_scope("matching_features"):
                 matching_features = tf.concat([
-                    sim_word, mp_word, esim_word, abcnn_word, deep_word,# sem_seq_word_left, sem_seq_word_right,
-                    sim_char, mp_char, esim_char, abcnn_char, deep_char,# sem_seq_char_left, sem_seq_char_right,
+                    sim_word, mp_word, esim_word, bcnn_word, deep_word,# sem_seq_word_left, sem_seq_word_right,
+                    sim_char, mp_char, esim_char, bcnn_char, deep_char,# sem_seq_char_left, sem_seq_char_right,
                 ], axis=-1)
 
         return matching_features

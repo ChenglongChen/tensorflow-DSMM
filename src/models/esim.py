@@ -34,33 +34,34 @@ class ESIMBaseModel(BaseModel):
         return x1_att, x2_att
 
 
-    def _interaction_semantic_feature_layer(self, seq_input_left, seq_input_right, seq_len_left, seq_len_right, granularity="word"):
-        #### embed
-        emb_matrix = self._get_embedding_matrix(granularity)
-        emb_seq_left = tf.nn.embedding_lookup(emb_matrix, seq_input_left)
-        emb_seq_right = tf.nn.embedding_lookup(emb_matrix, seq_input_right)
-
-        #### dropout
-        random_seed = np.random.randint(10000000)
-        emb_seq_left = word_dropout(emb_seq_left,
-                                    training=self.training,
-                                    dropout=self.params["embedding_dropout"],
-                                    seed=random_seed)
-        random_seed = np.random.randint(10000000)
-        emb_seq_right = word_dropout(emb_seq_right,
-                                     training=self.training,
-                                     dropout=self.params["embedding_dropout"],
-                                     seed=random_seed)
+    def _esim_semantic_feature_layer(self, emb_seq_left, emb_seq_right, seq_len_left, seq_len_right, granularity="word"):
+        # for sharing embedding with other sub-graph
+        # #### embed
+        # emb_matrix = self._get_embedding_matrix(granularity)
+        # emb_seq_left = tf.nn.embedding_lookup(emb_matrix, seq_input_left)
+        # emb_seq_right = tf.nn.embedding_lookup(emb_matrix, seq_input_right)
+        #
+        # #### dropout
+        # random_seed = np.random.randint(10000000)
+        # emb_seq_left = word_dropout(emb_seq_left,
+        #                             training=self.training,
+        #                             dropout=self.params["embedding_dropout"],
+        #                             seed=random_seed)
+        # random_seed = np.random.randint(10000000)
+        # emb_seq_right = word_dropout(emb_seq_right,
+        #                              training=self.training,
+        #                              dropout=self.params["embedding_dropout"],
+        #                              seed=random_seed)
 
         #### encode
         enc_seq_left = encode(emb_seq_left, method=self.params["encode_method"], params=self.params,
                               sequence_length=seq_len_left,
                               mask_zero=self.params["embedding_mask_zero"],
-                              scope_name=self.model_name + "enc_seq_%s" % granularity, reuse=False)
+                              scope_name=self.model_name + "esim_enc_seq_%s" % granularity, reuse=False)
         enc_seq_right = encode(emb_seq_right, method=self.params["encode_method"], params=self.params,
                                sequence_length=seq_len_right,
                                mask_zero=self.params["embedding_mask_zero"],
-                               scope_name=self.model_name + "enc_seq_%s" % granularity, reuse=True)
+                               scope_name=self.model_name + "esim_enc_seq_%s" % granularity, reuse=True)
 
         #### align
         ali_seq_left, ali_seq_right = self._soft_attention_alignment(enc_seq_left, enc_seq_right)
@@ -92,11 +93,11 @@ class ESIMBaseModel(BaseModel):
         feature_dim = self.params["encode_dim"]
         att_seq_left = attend(compare_seq_left, context=None, feature_dim=feature_dim,
                               method=self.params["attend_method"],
-                              scope_name=self.model_name + "att_seq_%s" % granularity,
+                              scope_name=self.model_name + "agg_seq_%s" % granularity,
                               reuse=False)
         att_seq_right = attend(compare_seq_right, context=None, feature_dim=feature_dim,
                                method=self.params["attend_method"],
-                               scope_name=self.model_name + "att_seq_%s" % granularity,
+                               scope_name=self.model_name + "agg_seq_%s" % granularity,
                                reuse=True)
         return tf.concat([att_seq_left, att_seq_right], axis=-1)
 
@@ -106,17 +107,37 @@ class ESIMBaseModel(BaseModel):
             tf.set_random_seed(self.params["random_seed"])
 
             with tf.name_scope("word_network"):
-                sim_word = self._interaction_semantic_feature_layer(
-                    self.seq_word_left,
-                    self.seq_word_right,
+                emb_seq_word_left, enc_seq_word_left, att_seq_word_left, sem_seq_word_left = \
+                    self._semantic_feature_layer(
+                        self.seq_word_left,
+                        self.seq_len_word_left,
+                        granularity="word", reuse=False)
+                emb_seq_word_right, enc_seq_word_right, att_seq_word_right, sem_seq_word_right = \
+                    self._semantic_feature_layer(
+                        self.seq_word_right,
+                        self.seq_len_word_right,
+                        granularity="word", reuse=True)
+                sim_word = self._esim_semantic_feature_layer(
+                    emb_seq_word_left,
+                    emb_seq_word_right,
                     self.seq_len_word_left,
                     self.seq_len_word_right,
                     granularity="word")
 
             with tf.name_scope("char_network"):
-                sim_char = self._interaction_semantic_feature_layer(
-                    self.seq_char_left,
-                    self.seq_char_right,
+                emb_seq_char_left, enc_seq_char_left, att_seq_char_left, sem_seq_char_left = \
+                    self._semantic_feature_layer(
+                        self.seq_char_left,
+                        self.seq_len_char_left,
+                        granularity="char", reuse=False)
+                emb_seq_char_right, enc_seq_char_right, att_seq_char_right, sem_seq_char_right = \
+                    self._semantic_feature_layer(
+                        self.seq_char_right,
+                        self.seq_len_char_right,
+                        granularity="char", reuse=True)
+                sim_char = self._esim_semantic_feature_layer(
+                    emb_seq_char_left,
+                    emb_seq_char_right,
                     self.seq_len_char_left,
                     self.seq_len_char_right,
                     granularity="char")
