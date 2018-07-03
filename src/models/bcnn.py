@@ -5,6 +5,7 @@ import numpy as np
 
 from inputs.dynamic_pooling import dynamic_pooling_index
 from models.base_model import BaseModel
+from tf_common import metrics
 
 
 class BCNNBaseModel(BaseModel):
@@ -179,16 +180,10 @@ class BCNNBaseModel(BaseModel):
             if self.params["bcnn_mp_att_pooling"] and att_pooled is not None:
                 outputs.append(att_pooled)
 
-        if self.params["similarity_aggregation"]:
-            for l, r in zip(left_ap_list, right_ap_list):
-                outputs.append(self._cosine_similarity(l, r))
-                outputs.append(self._euclidean_distance(l, r))
-                # outputs.append(self._canberra_score(l, r))
-        else:
-            for l, r in zip(left_ap_list, right_ap_list):
-                outputs.append(l * r)
-                outputs.append(tf.abs(l - r))
-                # outputs.append(tf.abs(l - r)/(l+r))
+        for l, r in zip(left_ap_list, right_ap_list):
+            outputs.append(metrics.cosine_similarity(l, r, self.params["similarity_aggregation"]))
+            outputs.append(metrics.dot_product(l, r, self.params["similarity_aggregation"]))
+            outputs.append(metrics.euclidean_distance(l, r, self.params["similarity_aggregation"]))
         return tf.concat(outputs, axis=-1)
 
 

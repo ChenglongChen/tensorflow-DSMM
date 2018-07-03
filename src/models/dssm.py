@@ -3,6 +3,7 @@ from copy import copy
 import tensorflow as tf
 
 from models.base_model import BaseModel
+from tf_common import metrics
 
 
 class DSSMBaseModel(BaseModel):
@@ -35,18 +36,13 @@ class DSSMBaseModel(BaseModel):
                             self.seq_word_right,
                             self.seq_len_word_right,
                             granularity="word", reuse=True)
-                if self.params["similarity_aggregation"]:
-                    sim_word = tf.concat([
-                        self._cosine_similarity(sem_seq_word_left, sem_seq_word_right),
-                        self._euclidean_distance(sem_seq_word_left, sem_seq_word_right),
-                        # self._canberra_score(sem_seq_word_left, sem_seq_word_right),
-                    ], axis=-1)
-                else:
-                    sim_word = tf.concat([
-                        sem_seq_word_left * sem_seq_word_right,
-                        tf.abs(sem_seq_word_left - sem_seq_word_right),
-                        # tf.abs(sem_seq_word_left - sem_seq_word_right) / (sem_seq_word_left + sem_seq_word_right),
-                    ], axis=-1)
+                # match score
+                sim_word = tf.concat([
+                    metrics.cosine_similarity(sem_seq_word_left, sem_seq_word_right, self.params["similarity_aggregation"]),
+                    metrics.dot_product(sem_seq_word_left, sem_seq_word_right, self.params["similarity_aggregation"]),
+                    metrics.euclidean_distance(sem_seq_word_left, sem_seq_word_right, self.params["similarity_aggregation"]),
+                    # self._canberra_score(sem_seq_word_left, sem_seq_word_right),
+                ], axis=-1)
 
             with tf.name_scope("char_network"):
                 if self.params["attend_method"] == "context-attention":
@@ -69,18 +65,13 @@ class DSSMBaseModel(BaseModel):
                             self.seq_char_right,
                             self.seq_len_char_right,
                             granularity="char", reuse=True)
-                if self.params["similarity_aggregation"]:
-                    sim_char = tf.concat([
-                        self._cosine_similarity(sem_seq_char_left, sem_seq_char_right),
-                        self._euclidean_distance(sem_seq_char_left, sem_seq_char_right),
-                        # self._canberra_score(sem_seq_char_left, sem_seq_char_right),
-                    ], axis=-1)
-                else:
-                    sim_char = tf.concat([
-                        sem_seq_char_left * sem_seq_char_right,
-                        tf.abs(sem_seq_char_left - sem_seq_char_right),
-                        # tf.abs(sem_seq_char_left - sem_seq_char_right) / (sem_seq_char_left + sem_seq_char_right),
-                    ], axis=-1)
+                # match score
+                sim_char = tf.concat([
+                    metrics.cosine_similarity(sem_seq_char_left, sem_seq_char_right, self.params["similarity_aggregation"]),
+                    metrics.dot_product(sem_seq_char_left, sem_seq_char_right, self.params["similarity_aggregation"]),
+                    metrics.euclidean_distance(sem_seq_char_left, sem_seq_char_right, self.params["similarity_aggregation"]),
+                    # self._canberra_score(sem_seq_char_left, sem_seq_char_right),
+                ], axis=-1)
 
             with tf.name_scope("matching_features"):
                 matching_features = tf.concat([sim_word, sim_char], axis=-1)

@@ -196,28 +196,6 @@ class BaseModel(object):
                 emb_seq_right, enc_seq_right, att_seq_right, sem_seq_right
 
 
-    def _cosine_similarity(self, v1, v2):
-        v1_n = tf.nn.l2_normalize(v1, dim=1)
-        v2_n = tf.nn.l2_normalize(v2, dim=1)
-        s = tf.reduce_sum(v1_n * v2_n, axis=1, keep_dims=True)
-        return s
-
-
-    def _euclidean_distance(self, v1, v2):
-        euclidean = tf.sqrt(tf.reduce_sum(tf.square(v1 - v2), axis=1))
-        return euclidean
-
-
-    def _euclidean_score(self, v1, v2):
-        euclidean = tf.sqrt(tf.reduce_sum(tf.square(v1 - v2), axis=1))
-        return 1. / (1. + euclidean)
-
-
-    def _canberra_score(self, v1, v2):
-        s = tf.reduce_sum(tf.abs(v1 - v2)/(v1+v2), axis=1)
-        return s
-
-
     def _get_matching_features(self):
         pass
 
