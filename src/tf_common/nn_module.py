@@ -256,45 +256,125 @@ def encode(x, method, params, sequence_length=None, mask_zero=False, scope_name=
     return z
 
 
-def attention(x, feature_dim, sequence_length=None, mask_zero=False, maxlen=None, epsilon=1e-8, seed=0,
-              scope_name="attention", reuse=False):
-    input_shape = tf.shape(x)
-    step_dim = input_shape[1]
-    # feature_dim = input_shape[2]
-    x = tf.reshape(x, [-1, feature_dim])
+def scalar_attention(x, encode_dim, feature_dim, attention_dim, sequence_length=None,
+                     mask_zero=False, maxlen=None, epsilon=1e-8, seed=0, scope_name="attention", reuse=False):
     """
-    The last dimension of the inputs to `Dense` should be defined. Found `None`.
-
-    cann't not use `tf.layers.Dense` here
-    eij = tf.layers.Dense(1)(x)
-
-    see: https://github.com/tensorflow/tensorflow/issues/13348
-    workaround: specify the feature_dim as input
+    :param x: [batchsize, s, feature_dim]
+    :param encode_dim: dim of encoder output
+    :param feature_dim: dim of x (for self-attention, x is the encoder output;
+                        for context-attention, x is the concat of encoder output and contextual info)
+    :param sequence_length:
+    :param mask_zero:
+    :param maxlen:
+    :param epsilon:
+    :param seed:
+    :param scope_name:
+    :param reuse:
+    :return: [batchsize, s, 1]
     """
     with tf.variable_scope(scope_name, reuse=reuse):
-        eij = tf.layers.dense(x, 1, activation=tf.nn.tanh,
-                              kernel_initializer=tf.glorot_uniform_initializer(seed=seed),
-                              reuse=reuse,
-                              name=scope_name)
-    eij = tf.reshape(eij, [-1, step_dim])
-    a = tf.exp(eij)
+        # W1: [feature_dim]
+        W1 = tf.get_variable("W1_%s" % scope_name,
+                             initializer=tf.truncated_normal_initializer(
+                                 mean=0.0, stddev=0.2, dtype=tf.float32, seed=seed),
+                             dtype=tf.float32,
+                             shape=[feature_dim])
+        # b1: [1]
+        b1 = tf.get_variable("b1_%s" % scope_name,
+                             initializer=tf.truncated_normal_initializer(
+                                 mean=0.0, stddev=0.2, dtype=tf.float32, seed=seed),
+                             dtype=tf.float32,
+                             shape=[1])
+    e = tf.einsum("bsf,f->bs", x, W1) + \
+        tf.expand_dims(b1, axis=1)
+    a = tf.exp(e)
 
     # apply mask after the exp. will be re-normalized next
     if mask_zero:
-        # None * step_dim
+        # None * s
         mask = tf.sequence_mask(sequence_length, maxlen)
         mask = tf.cast(mask, tf.float32)
         a = a * mask
 
     # in some cases especially in the early stages of training the sum may be almost zero
-    a /= tf.cast(tf.reduce_sum(a, axis=1, keep_dims=True) + epsilon, tf.float32)
-
+    s = tf.reduce_sum(a, axis=1, keep_dims=True)
+    a /= tf.cast(s + epsilon, tf.float32)
     a = tf.expand_dims(a, axis=-1)
+
     return a
 
 
-def _attend(x, sequence_length=None, method="ave", context=None, feature_dim=None, mask_zero=False, maxlen=None,
-           bn=False, training=False, seed=0, scope_name="attention", reuse=False):
+# vector-based attention proposed in the following paper
+# Enhancing Sentence Embedding with Generalized Pooling
+def vector_attention(x, encode_dim, feature_dim, attention_dim, sequence_length=None,
+                     mask_zero=False, maxlen=None, epsilon=1e-8, seed=0,
+                     scope_name="attention", reuse=False):
+    """
+    :param x: [batchsize, s, feature_dim]
+    :param encode_dim: dim of encoder output
+    :param feature_dim: dim of x (for self-attention, x is the encoder output;
+                        for context-attention, x is the concat of encoder output and contextual info)
+    :param sequence_length:
+    :param mask_zero:
+    :param maxlen:
+    :param epsilon:
+    :param seed:
+    :param scope_name:
+    :param reuse:
+    :return: [batchsize, s, encode_dim]
+    """
+    with tf.variable_scope(scope_name, reuse=reuse):
+        # W1: [attention_dim, feature_dim]
+        W1 = tf.get_variable("W1_%s" % scope_name,
+                             initializer=tf.truncated_normal_initializer(
+                                 mean=0.0, stddev=0.2, dtype=tf.float32, seed=seed),
+                             dtype=tf.float32,
+                             shape=[attention_dim, feature_dim])
+        # b1: [attention_dim]
+        b1 = tf.get_variable("b1_%s" % scope_name,
+                             initializer=tf.truncated_normal_initializer(
+                                 mean=0.0, stddev=0.2, dtype=tf.float32, seed=seed),
+                             dtype=tf.float32,
+                             shape=[attention_dim])
+        # W2: [encode_dim, attention_dim]
+        W2 = tf.get_variable("W2_%s" % scope_name,
+                             initializer=tf.truncated_normal_initializer(
+                                 mean=0.0, stddev=0.2, dtype=tf.float32, seed=seed),
+                             dtype=tf.float32,
+                             shape=[encode_dim, attention_dim])
+        # b2: [encode_dim]
+        b2 = tf.get_variable("b2_%s" % scope_name,
+                             initializer=tf.truncated_normal_initializer(
+                                 mean=0.0, stddev=0.2, dtype=tf.float32, seed=seed),
+                             dtype=tf.float32,
+                             shape=[encode_dim])
+    # [batchsize, attention_dim, s]
+    e = tf.nn.relu(
+        tf.einsum("bsf,af->bas", x, W1) + \
+        tf.expand_dims(tf.expand_dims(b1, axis=0), axis=-1))
+    # [batchsize, s, encode_dim]
+    e = tf.einsum("bas,ea->bse", e, W2) + \
+        tf.expand_dims(tf.expand_dims(b2, axis=0), axis=0)
+    a = tf.exp(e)
+
+    # apply mask after the exp. will be re-normalized next
+    if mask_zero:
+        # [batchsize, s, 1]
+        mask = tf.sequence_mask(sequence_length, maxlen)
+        mask = tf.expand_dims(tf.cast(mask, tf.float32), axis=-1)
+        a = a * mask
+
+    # in some cases especially in the early stages of training the sum may be almost zero
+    s = tf.reduce_sum(a, axis=1, keep_dims=True)
+    a /= tf.cast(s + epsilon, tf.float32)
+
+    return a
+
+
+def _attend(x, sequence_length=None, method="ave", context=None, encode_dim=None,
+            feature_dim=None, attention_dim=None, mask_zero=False, maxlen=None,
+           bn=False, training=False, seed=0, scope_name="attention", reuse=False,
+            num_heads=1):
     if method == "ave":
         if mask_zero:
             # None * step_dim
@@ -341,30 +421,35 @@ def _attend(x, sequence_length=None, method="ave", context=None, feature_dim=Non
             z = tf.reduce_min(x, axis=1)
     elif "attention" in method:
         if context is not None:
-            # step_dim = tf.shape(x)[1]
-            # context = tf.expand_dims(context, axis=1)
-            # context = tf.tile(context, [1, step_dim, 1])
             y = tf.concat([x, context], axis=-1)
         else:
             y = x
-        a = attention(y, feature_dim, sequence_length, mask_zero, maxlen, seed=seed, scope_name=scope_name, reuse=reuse)
-        z = tf.reduce_sum(x * a, axis=1)
+        zs = []
+        for i in range(num_heads):
+            if "vector" in method:
+                a = vector_attention(y, encode_dim, feature_dim, attention_dim, sequence_length, mask_zero, maxlen, seed=seed, scope_name=scope_name+str(i), reuse=reuse)
+            else:
+                a = scalar_attention(y, encode_dim, feature_dim, attention_dim, sequence_length, mask_zero, maxlen, seed=seed, scope_name=scope_name+str(i), reuse=reuse)
+            zs.append(tf.reduce_sum(x * a, axis=1))
+        z = tf.concat(zs, axis=-1)
     if bn:
         z = tf.layers.BatchNormalization()(z, training=training)
     return z
 
 
-def attend(x, sequence_length=None, method="ave", context=None, feature_dim=None, mask_zero=False, maxlen=None,
-           bn=False, training=False, seed=0, scope_name="attention", reuse=False):
+def attend(x, sequence_length=None, method="ave", context=None, encode_dim=None,
+           feature_dim=None, attention_dim=None, mask_zero=False, maxlen=None,
+           bn=False, training=False, seed=0, scope_name="attention", reuse=False,
+           num_heads=1):
     if isinstance(method, list):
         outputs = [None]*len(method)
         for i,m in enumerate(method):
-            outputs[i] = _attend(x, sequence_length, m, context, feature_dim, mask_zero, maxlen,
-                                bn, training, seed, scope_name+m, reuse)
+            outputs[i] = _attend(x, sequence_length, m, context, encode_dim, feature_dim, attention_dim, mask_zero, maxlen,
+                                bn, training, seed, scope_name+m, reuse, num_heads)
         return tf.concat(outputs, axis=-1)
     else:
-        return _attend(x, sequence_length, method, context, feature_dim, mask_zero, maxlen,
-                                bn, training, seed, scope_name+method, reuse)
+        return _attend(x, sequence_length, method, context, encode_dim, feature_dim, attention_dim, mask_zero, maxlen,
+                                bn, training, seed, scope_name+method, reuse, num_heads)
 
 
 #### Step 4

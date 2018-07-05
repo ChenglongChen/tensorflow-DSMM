@@ -2,16 +2,22 @@
 
 Ongoing project for implementing various Deep Semantic Matching Models (DSMM). DSMM is widely used for:
 
-- search relevance
-- question answering
+
 - duplicate detection
+- sentence similarity
+- question answering
+- search relevance
 - ...
 
-# Supported Models
+## Supported Models
+
+### Representation based methods
 - DSSM style models
     - DSSM: use FastText as encoder
     - CDSSM: use TextCNN as encoder
     - RDSSM: use TextRNN/TextBiRNN as encoder
+    
+### Interaction based methods
 - MatchPyramid style models
     - MatchPyramid: use cosine similarity/dot product as match matrix
     - General MatchPyramid: use match matrices based on various embeddings and various match scores
@@ -29,6 +35,18 @@ Ongoing project for implementing various Deep Semantic Matching Models (DSMM). D
     - ABCNN2
     - ABCNN3
 - ESIM
+
+## Building Blocks
+### Encoder layers
+- FastText
+- TextCNN (Gated CNN and also Residual Gated CNN)
+- TextRNN/TextBiRNN with GRU and LSTM cell
+
+### Attention layers
+- mean/max/min pooling
+- scalar-based and vector-based attention
+- self and context attention
+- multi-head attention
 
 # Acknowledgments
 This project gets inspirations from the following projects:

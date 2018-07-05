@@ -13,6 +13,7 @@ QUESTION_FILE = DATA_DIR + "/question.csv"
 WORD_EMBEDDING_FILE = DATA_DIR + "/word_embed.txt"
 CHAR_EMBEDDING_FILE = DATA_DIR + "/char_embed.txt"
 
+SUB_DIR = "../sub"
 SUB_FILE = "submission.csv"
 SINGLE_SUB_FILE_PATTERN = "submission_%s_%s.csv"
 STACKING_SUB_FILE_PATTERN = "submission_%s.csv"
@@ -36,3 +37,10 @@ p1/(p0 + p1) ~= 17.371649/log(eps)
               = 17.371649/log(1e-15)
               = 0.50296075348400959
 """
+
+NUM_TRAIN = 254386
+NUM_TEST = 172956
+
+TRAIN_RATIO = 0.7
+
+SPLIT_FILE = "split.pkl"

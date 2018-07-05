@@ -91,14 +91,20 @@ class ESIMBaseModel(BaseModel):
 
         #### attend
         feature_dim = self.params["encode_dim"]
-        att_seq_left = attend(compare_seq_left, context=None, feature_dim=feature_dim,
+        att_seq_left = attend(compare_seq_left, context=None,
+                              encode_dim=self.params["encode_dim"],
+                              feature_dim=feature_dim,
+                              attention_dim=self.params["attention_dim"],
                               method=self.params["attend_method"],
                               scope_name=self.model_name + "agg_seq_%s" % granularity,
-                              reuse=False)
-        att_seq_right = attend(compare_seq_right, context=None, feature_dim=feature_dim,
+                              reuse=False, num_heads=self.params["attention_num_heads"])
+        att_seq_right = attend(compare_seq_right, context=None,
+                               encode_dim=self.params["encode_dim"],
+                               feature_dim=feature_dim,
+                               attention_dim=self.params["attention_dim"],
                                method=self.params["attend_method"],
                                scope_name=self.model_name + "agg_seq_%s" % granularity,
-                               reuse=True)
+                               reuse=True, num_heads=self.params["attention_num_heads"])
         return tf.concat([att_seq_left, att_seq_right], axis=-1)
 
 

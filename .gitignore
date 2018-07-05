@@ -115,3 +115,6 @@ weights
 run*
 *.csv
 features.py
+gen_stacking.py
+generate_train_valid_split.py
+split.pkl

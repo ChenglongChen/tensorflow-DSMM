@@ -123,10 +123,13 @@ class BaseModel(object):
         #### attend
         feature_dim = self.params["encode_dim"]
         context = None
-        att_seq = attend(enc_seq, context=context, feature_dim=feature_dim,
-                                   method=self.params["attend_method"],
-                                   scope_name=self.model_name + "att_seq_%s"%granularity,
-                                   reuse=reuse)
+        att_seq = attend(enc_seq, context=context,
+                         encode_dim=self.params["encode_dim"],
+                         feature_dim=feature_dim,
+                         attention_dim=self.params["attention_dim"],
+                         method=self.params["attend_method"],
+                         scope_name=self.model_name + "att_seq_%s"%granularity,
+                         reuse=reuse, num_heads=self.params["attention_num_heads"])
 
         #### MLP nonlinear projection
         sem_seq = self._mlp_layer(att_seq, fc_type=self.params["fc_type"],
@@ -208,6 +211,7 @@ class BaseModel(object):
                 else:
                     out_0 = self.matching_features
                     # out_0 = self.features
+                out_0 = tf.layers.Dropout(self.params["final_dropout"])(out_0, training=self.training)
                 out = self._mlp_layer(out_0, fc_type=self.params["fc_type"],
                                       hidden_units=self.params["fc_hidden_units"],
                                       dropouts=self.params["fc_dropouts"],

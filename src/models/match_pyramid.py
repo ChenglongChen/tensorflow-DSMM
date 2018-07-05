@@ -35,7 +35,7 @@ class MatchPyramidBaseModel(BaseModel):
             ), tf.float32), axis=-1)
 
         # 2. compressed word embedding
-        eW = tf.get_variable("eW_%s" % granularity,
+        eW = tf.get_variable("eW_%s" % (self.model_name + granularity),
                              initializer=tf.truncated_normal_initializer(mean=0.0, stddev=0.2, dtype=tf.float32),
                              dtype=tf.float32,
                              shape=[self.params["embedding_dim_%s" % granularity],

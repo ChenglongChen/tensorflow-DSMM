@@ -1,5 +1,6 @@
 
 import sys
+import pickle as pkl
 import numpy as np
 import tensorflow as tf
 
@@ -44,10 +45,10 @@ params = {
     "use_features": False,
     "num_features": 1,
 
-    "n_runs": 20,
+    "n_runs": 10,
     "batch_size": 128,
-    "epoch": 50,
-    "max_batch": -1,
+    "epoch": 25,
+    "max_batch": 1,
     "l2_lambda": 0.000,
 
     # embedding
@@ -83,7 +84,9 @@ params = {
 
     # semantic feature layer
     "encode_method": "textcnn",
-    "attend_method": ["ave", "max", "min", "self-attention"],
+    "attend_method": ["ave", "max", "min", "self-vector-attention"],
+    "attention_dim": 64,
+    "attention_num_heads": 5,
 
     # cnn
     "cnn_num_layers": 1,
@@ -130,6 +133,9 @@ params = {
     "bcnn_mp_pool_sizes_word": [6, 3],
     "bcnn_mp_pool_sizes_char": [10, 5],
 
+    # final layer
+    "final_dropout": 0.2,
+
 }
 
 
@@ -152,19 +158,14 @@ def main():
     params["num_features"] = train_features.shape[1]
 
 
-    # shuffle training data
-    idx = np.arange(dfTrain.shape[0])
-    np.random.shuffle(idx)
-    dfTrain = dfTrain.iloc[idx]
-    train_features = train_features[idx]
+    # load split
+    with open(config.SPLIT_FILE, "rb") as f:
+        train_idx, valid_idx = pkl.load(f)
 
 
     # validation
-    train_ratio = 0.7
-    N = dfTrain.shape[0]
-    train_num = int(N * train_ratio)
-    X_train = get_model_data(dfTrain[:train_num], train_features[:train_num], params)
-    X_valid = get_model_data(dfTrain[train_num:], train_features[train_num:], params)
+    X_train = get_model_data(dfTrain.loc[train_idx], train_features[train_idx], params)
+    X_valid = get_model_data(dfTrain.loc[valid_idx], train_features[valid_idx], params)
 
     model = get_model(model_type)(params, logger, init_embedding_matrix=init_embedding_matrix)
     model.fit(X_train, Q, validation_data=X_valid, shuffle=True)
