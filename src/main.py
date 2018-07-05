@@ -48,7 +48,7 @@ params = {
     "n_runs": 10,
     "batch_size": 128,
     "epoch": 25,
-    "max_batch": 1,
+    "max_batch": -1,
     "l2_lambda": 0.000,
 
     # embedding
@@ -72,7 +72,7 @@ params = {
     "pad_sequences_truncating": "post",
 
     # optimization
-    "optimizer_type": "nadam",
+    "optimizer_type": "lazynadam",
     "init_lr": 0.001,
     "beta1": 0.975,
     "beta2": 0.999,
@@ -123,7 +123,7 @@ params = {
     "bcnn_num_filters": 16,
     "bcnn_filter_size": 3,
     "bcnn_activation": tf.nn.tanh, # tf.nn.relu with euclidean/euclidean_exp produce nan
-    "bcnn_match_score_type": "euclidean_exp",
+    "bcnn_match_score_type": "cosine",
 
     "bcnn_mp_att_pooling": False,
     "bcnn_mp_num_filters": [8, 16],

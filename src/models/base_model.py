@@ -7,7 +7,7 @@ from sklearn.metrics import log_loss
 
 import config
 from utils import os_utils
-from tf_common.nadam import NadamOptimizer
+from tf_common.optimizer import *
 from tf_common.nn_module import word_dropout, dense_block, resnet_block
 from tf_common.nn_module import encode, attend
 
@@ -243,13 +243,35 @@ class BaseModel(object):
     def _get_train_op(self):
         with tf.name_scope(self.model_name + "/"):
             with tf.name_scope("optimization"):
-                if self.params["optimizer_type"] == "nadam":
-                    optimizer = NadamOptimizer(learning_rate=self.learning_rate, beta1=self.params["beta1"],
-                                                    beta2=self.params["beta2"], epsilon=1e-8,
-                                                    schedule_decay=self.params["schedule_decay"])
+                if self.params["optimizer_type"] == "lazynadam":
+                    optimizer = LazyNadamOptimizer(learning_rate=self.learning_rate, beta1=self.params["beta1"],
+                                                   beta2=self.params["beta2"], epsilon=1e-8,
+                                                   schedule_decay=self.params["schedule_decay"])
                 elif self.params["optimizer_type"] == "adam":
-                    optimizer = tf.train.AdamOptimizer(learning_rate=self.learning_rate, beta1=self.params["beta1"],
-                                                            beta2=self.params["beta2"], epsilon=1e-8)
+                    optimizer = tf.train.AdamOptimizer(learning_rate=self.learning_rate,
+                                                       beta1=self.params["beta1"],
+                                                       beta2=self.params["beta2"], epsilon=1e-8)
+                elif self.params["optimizer_type"] == "lazyadam":
+                    optimizer = tf.contrib.opt.LazyAdamOptimizer(learning_rate=self.learning_rate,
+                                                                 beta1=self.params["beta1"],
+                                                                 beta2=self.params["beta2"], epsilon=1e-8)
+                elif self.params["optimizer_type"] == "adagrad":
+                    optimizer = tf.train.AdagradOptimizer(learning_rate=self.learning_rate,
+                                                          initial_accumulator_value=1e-7)
+                elif self.params["optimizer_type"] == "gd":
+                    optimizer = tf.train.GradientDescentOptimizer(learning_rate=self.learning_rate)
+                elif self.params["optimizer_type"] == "momentum":
+                    optimizer = tf.train.MomentumOptimizer(learning_rate=self.learning_rate, momentum=0.95)
+                elif self.params["optimizer_type"] == "rmsprop":
+                    optimizer = tf.train.RMSPropOptimizer(learning_rate=self.learning_rate, decay=0.9,
+                                                          momentum=0.9, epsilon=1e-8)
+                elif self.params["optimizer_type"] == "lazypowersign":
+                    optimizer = LazyPowerSignOptimizer(learning_rate=self.learning_rate)
+                elif self.params["optimizer_type"] == "lazyaddsign":
+                    optimizer = LazyAddSignOptimizer(learning_rate=self.learning_rate)
+                elif self.params["optimizer_type"] == "lazyamsgrad":
+                    optimizer = LazyAMSGradOptimizer(learning_rate=self.learning_rate, beta1=self.params["beta1"],
+                                                     beta2=self.params["beta2"], epsilon=1e-8)
 
                 update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
                 with tf.control_dependencies(update_ops):

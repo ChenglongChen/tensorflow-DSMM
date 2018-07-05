@@ -19,13 +19,14 @@ Ongoing project for implementing various Deep Semantic Matching Models (DSMM). D
     
 ### Interaction based methods
 - MatchPyramid style models
-    - MatchPyramid: use cosine similarity/dot product as match matrix
+    - MatchPyramid: use identity/cosine similarity/dot product as match matrix
     - General MatchPyramid: use match matrices based on various embeddings and various match scores
         - word embeddings
             - original word embedding
             - compressed word embedding
             - contextual word embedding (use an encoder to encode contextual information)
         - match score
+            - identity
             - cosine similarity/dot product
             - element product
             - element concat
