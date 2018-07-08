@@ -74,9 +74,10 @@ class DSSMBaseModel(BaseModel):
                 ], axis=-1)
 
             with tf.name_scope("matching_features"):
-                matching_features = tf.concat([sim_word, sim_char], axis=-1)
+                matching_features_word = sim_word
+                matching_features_char = sim_char
 
-        return matching_features
+        return matching_features_word, matching_features_char
 
 
 class DSSM(DSSMBaseModel):
@@ -86,7 +87,7 @@ class DSSM(DSSMBaseModel):
         p.update({
             "model_name": p["model_name"] + "dssm",
             "encode_method": "fasttext",
-            "attend_method": ["ave", "max", "min", "self-attention"],
+            "attend_method": ["ave", "max", "min", "self-scalar-attention"],
 
             # fc block
             "fc_type": "fc",
@@ -103,7 +104,7 @@ class CDSSM(DSSMBaseModel):
         p.update({
             "model_name": p["model_name"] + "cdssm",
             "encode_method": "textcnn",
-            "attend_method": ["ave", "max", "min", "self-attention"],
+            "attend_method": ["ave", "max", "min", "self-scalar-attention"],
 
             # cnn
             "cnn_num_layers": 1,
@@ -111,8 +112,8 @@ class CDSSM(DSSMBaseModel):
             "cnn_filter_sizes": [1, 2, 3],
             "cnn_timedistributed": False,
             "cnn_activation": tf.nn.relu,
-            "cnn_gated_conv": True,
-            "cnn_residual": True,
+            "cnn_gated_conv": False,
+            "cnn_residual": False,
 
             # fc block
             "fc_type": "fc",
@@ -129,7 +130,7 @@ class RDSSM(DSSMBaseModel):
         p.update({
             "model_name": p["model_name"] + "rdssm",
             "encode_method": "textbirnn",
-            "attend_method": ["ave", "max", "min", "self-attention"],
+            "attend_method": ["ave", "max", "min", "self-scalar-attention"],
 
             # rnn
             "rnn_num_units": 32,

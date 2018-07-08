@@ -283,9 +283,10 @@ class BCNNBaseModel(BaseModel):
                 sim_char = self._bcnn_semantic_feature_layer(emb_seq_char_left, emb_seq_char_right, self.dpool_index_char, granularity="char")
 
             with tf.name_scope("matching_features"):
-                matching_features = tf.concat([sim_word, sim_char], axis=-1)
+                matching_features_word = sim_word
+                matching_features_char = sim_char
 
-        return matching_features
+        return matching_features_word, matching_features_char
 
 
 class BCNN(BCNNBaseModel):

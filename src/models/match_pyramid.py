@@ -179,7 +179,7 @@ class MatchPyramid(MatchPyramidBaseModel):
                             granularity="word", reuse=True)
                 match_matrix_word = tf.einsum("abd,acd->abc", emb_seq_word_left, emb_seq_word_right)
                 match_matrix_word = tf.expand_dims(match_matrix_word, axis=-1)
-                cross_word = self._mp_semantic_feature_layer(match_matrix_word, self.dpool_index_word,
+                sim_word = self._mp_semantic_feature_layer(match_matrix_word, self.dpool_index_word,
                                                              granularity="word")
 
             with tf.name_scope("char_network"):
@@ -205,12 +205,13 @@ class MatchPyramid(MatchPyramidBaseModel):
                             granularity="char", reuse=True)
                 match_matrix_char = tf.einsum("abd,acd->abc", emb_seq_char_left, emb_seq_char_right)
                 match_matrix_char = tf.expand_dims(match_matrix_char, axis=-1)
-                cross_char = self._mp_semantic_feature_layer(match_matrix_char, self.dpool_index_char,
+                sim_char = self._mp_semantic_feature_layer(match_matrix_char, self.dpool_index_char,
                                                              granularity="char")
             with tf.name_scope("matching_features"):
-                matching_features = tf.concat([cross_word, cross_char], axis=-1)
+                matching_features_word = sim_word
+                matching_features_char = sim_char
 
-        return matching_features
+        return matching_features_word, matching_features_char
 
 
 class GMatchPyramid(MatchPyramidBaseModel):
@@ -268,7 +269,7 @@ class GMatchPyramid(MatchPyramidBaseModel):
                 match_matrix_word = self._get_match_matrix(self.seq_word_left, emb_seq_word_left, enc_seq_word_left,
                                                            self.seq_word_right, emb_seq_word_right, enc_seq_word_right,
                                                            granularity="word")
-                cross_word = self._mp_semantic_feature_layer(match_matrix_word, self.dpool_index_word, granularity="word")
+                sim_word = self._mp_semantic_feature_layer(match_matrix_word, self.dpool_index_word, granularity="word")
 
             with tf.name_scope("char_network"):
                 if self.params["attend_method"] == "context-attention":
@@ -295,10 +296,11 @@ class GMatchPyramid(MatchPyramidBaseModel):
                 match_matrix_char = self._get_match_matrix(self.seq_char_left, emb_seq_char_left, enc_seq_char_left,
                                                            self.seq_char_right, emb_seq_char_right, enc_seq_char_right,
                                                            granularity="char")
-                cross_char = self._mp_semantic_feature_layer(match_matrix_char, self.dpool_index_char,
+                sim_char = self._mp_semantic_feature_layer(match_matrix_char, self.dpool_index_char,
                                                              granularity="char")
 
             with tf.name_scope("matching_features"):
-                matching_features = tf.concat([cross_word, cross_char], axis=-1)
+                matching_features_word = sim_word
+                matching_features_char = sim_char
 
-        return matching_features
+        return matching_features_word, matching_features_char

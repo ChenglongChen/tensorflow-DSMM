@@ -137,9 +137,11 @@ class DSMM(MatchPyramidBaseModel, ESIMBaseModel, BCNN):
                                             reuse=False)
 
             with tf.name_scope("matching_features"):
-                matching_features = tf.concat([
+                matching_features_word = tf.concat([
                     sim_word, mp_word, esim_word, bcnn_word, deep_word,# sem_seq_word_left, sem_seq_word_right,
+                ], axis=-1)
+                matching_features_char = tf.concat([
                     sim_char, mp_char, esim_char, bcnn_char, deep_char,# sem_seq_char_left, sem_seq_char_right,
                 ], axis=-1)
 
-        return matching_features
+        return matching_features_word, matching_features_char

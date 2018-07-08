@@ -12,6 +12,10 @@ from tf_common.nn_module import word_dropout, dense_block, resnet_block
 from tf_common.nn_module import encode, attend
 
 
+def sigmoid(x):
+    return 1./(1.+np.exp(-x))
+
+
 class BaseModel(object):
     def __init__(self, params, logger, init_embedding_matrix=None):
         self.params = params
@@ -19,12 +23,11 @@ class BaseModel(object):
         self.init_embedding_matrix = init_embedding_matrix
         self.model_name = self.params["model_name"]
         self.threshold = self.params["threshold"]
-        self.calibration_factor = self.params["calibration_factor"]
         self.calibration_model = None
         # os_utils._makedirs(self.params["offline_model_dir"], force=True)
 
         self._init_tf_vars()
-        self.matching_features = self._get_matching_features()
+        self.matching_features_word, self.matching_features_char = self._get_matching_features()
         self.logits, self.proba = self._get_prediction()
         self.loss = self._get_loss()
         self.train_op = self._get_train_op()
@@ -206,20 +209,28 @@ class BaseModel(object):
     def _get_prediction(self):
         with tf.name_scope(self.model_name + "/"):
             with tf.name_scope("prediction"):
+                lst = []
+                if "word" in self.params["granularity"]:
+                    lst.append(self.matching_features_word)
+                if "char" in self.params["granularity"]:
+                    lst.append(self.matching_features_char)
                 if self.params["use_features"]:
-                    out_0 = tf.concat([self.features, self.matching_features], axis=-1)
-                else:
-                    out_0 = self.matching_features
-                    # out_0 = self.features
-                out_0 = tf.layers.Dropout(self.params["final_dropout"])(out_0, training=self.training)
-                out = self._mlp_layer(out_0, fc_type=self.params["fc_type"],
+                    out_0 = self._mlp_layer(self.features, fc_type=self.params["fc_type"],
+                                      hidden_units=self.params["fc_hidden_units"],
+                                      dropouts=self.params["fc_dropouts"],
+                                      scope_name=self.model_name + "mlp_features",
+                                      reuse=False)
+                    lst.append(out_0)
+                out = tf.concat(lst, axis=-1)
+                out = tf.layers.Dropout(self.params["final_dropout"])(out, training=self.training)
+                out = self._mlp_layer(out, fc_type=self.params["fc_type"],
                                       hidden_units=self.params["fc_hidden_units"],
                                       dropouts=self.params["fc_dropouts"],
                                       scope_name=self.model_name + "mlp",
                                       reuse=False)
                 logits = tf.layers.dense(out, 1, activation=None,
                                          kernel_initializer=tf.glorot_uniform_initializer(
-                                             seed=self.params["random_seed"]),
+                                         seed=self.params["random_seed"]),
                                          name=self.model_name + "logits")
                 logits = tf.squeeze(logits, axis=1)
                 proba = tf.nn.sigmoid(logits)
@@ -258,6 +269,8 @@ class BaseModel(object):
                 elif self.params["optimizer_type"] == "adagrad":
                     optimizer = tf.train.AdagradOptimizer(learning_rate=self.learning_rate,
                                                           initial_accumulator_value=1e-7)
+                elif self.params["optimizer_type"] == "adadelta":
+                    optimizer = tf.train.AdadeltaOptimizer(learning_rate=self.learning_rate)
                 elif self.params["optimizer_type"] == "gd":
                     optimizer = tf.train.GradientDescentOptimizer(learning_rate=self.learning_rate)
                 elif self.params["optimizer_type"] == "momentum":
@@ -608,10 +621,8 @@ class BaseModel(object):
                 total_loss = loss_decay * total_loss + (1. - loss_decay) * loss
                 if validation_data is not None and (self.params["eval_every_num_update"] > 0) and (global_step % self.params["eval_every_num_update"] == 0):
                     y_valid = validation_data["label"]
-                    y_proba = self.predict_proba(validation_data, Q)
+                    y_proba, y_proba_cal = self._predict_proba(validation_data, Q, fit_calibration=self.params["calibration"])
                     valid_loss = log_loss(y_valid, y_proba, eps=1e-15)
-                    # y_proba_cal = self.predict_proba(validation_data, Q, calibration=True)
-                    y_proba_cal = y_proba
                     valid_loss_cal = log_loss(y_valid, y_proba_cal, eps=1e-15)
                     summary = tf.Summary()
                     summary.value.add(tag="logloss", simple_value=valid_loss)
@@ -646,21 +657,22 @@ class BaseModel(object):
         return y_pred
 
 
-    def predict_logit(self, X, Q):
-        return self._predict_node(X, Q, self.logits)
-
-
-    def predict_proba(self, X, Q, calibration=False):
-        if calibration:
-            y_logit = self.predict_logit(X, Q)
+    def _predict_proba(self, X, Q, fit_calibration=False):
+        y_logit = self._predict_node(X, Q, self.logits)
+        y_proba = sigmoid(y_logit)
+        y_proba_cal = y_proba
+        if fit_calibration:
             y_valid = X["label"]
-            if self.calibration_model is None:
-                self.calibration_model = LogisticRegression()
-                self.calibration_model.fit(y_logit, y_valid)
-            y_proba = self.calibration_model.predict_proba(y_logit)
-            return y_proba
-        else:
-            return self._predict_node(X, Q, self.proba)
+            self.calibration_model = LogisticRegression()
+            self.calibration_model.fit(y_logit, y_valid)
+        if self.calibration_model is not None:
+            y_proba_cal = self.calibration_model.predict_proba(y_logit)[:,1]
+        return y_proba, y_proba_cal
+
+
+    def predict_proba(self, X, Q):
+        _, y_proba_cal = self._predict_proba(X, Q, fit_calibration=False)
+        return y_proba_cal
 
 
     def predict(self, X, Q):

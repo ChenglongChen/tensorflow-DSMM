@@ -170,7 +170,6 @@ def main():
     model = get_model(model_type)(params, logger, init_embedding_matrix=init_embedding_matrix)
     model.fit(X_train, Q, validation_data=X_valid, shuffle=True)
 
-
     # submit
     X_train = get_model_data(dfTrain, train_features, params)
     X_test = get_model_data(dfTest, test_features, params)
@@ -181,6 +180,7 @@ def main():
         model = get_model(model_type)(params, logger, init_embedding_matrix=init_embedding_matrix)
         model.fit(X_train, Q, validation_data=None, shuffle=True)
         y_proba[:,run] = model.predict_proba(X_test, Q).flatten()
+
         dfTest["y_pre"] = np.mean(y_proba[:,:(run+1)], axis=1)
         dfTest[["y_pre"]].to_csv(config.SINGLE_SUB_FILE_PATTERN%(model_type, str(run+1)), header=True, index=False)
 

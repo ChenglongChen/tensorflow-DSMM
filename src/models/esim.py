@@ -149,9 +149,10 @@ class ESIMBaseModel(BaseModel):
                     granularity="char")
 
             with tf.name_scope("matching_features"):
-                matching_features = tf.concat([sim_word, sim_char], axis=-1)
+                matching_features_word = sim_word
+                matching_features_char = sim_char
 
-        return matching_features
+        return matching_features_word, matching_features_char
 
 
 class ESIM(ESIMBaseModel):
