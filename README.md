@@ -36,10 +36,13 @@ Ongoing project for implementing various Deep Semantic Matching Models (DSMM). D
     - ABCNN2
     - ABCNN3
 - ESIM
+- DecAtt (Decomposable Attention)
+
 
 ## Building Blocks
 ### Encoder layers
 - FastText
+- TimeDistributed Dense Projection
 - TextCNN (Gated CNN and also Residual Gated CNN)
 - TextRNN/TextBiRNN with GRU and LSTM cell
 

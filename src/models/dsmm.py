@@ -3,12 +3,13 @@ from copy import copy
 import tensorflow as tf
 
 from models.bcnn import BCNN, ABCNN1, ABCNN2, ABCNN3
-from models.esim import ESIMBaseModel
+from models.esim import ESIMDecAttBaseModel
 from models.match_pyramid import MatchPyramidBaseModel
 from tf_common import metrics
+from tf_common.nn_module import mlp_layer
 
 
-class DSMM(MatchPyramidBaseModel, ESIMBaseModel, BCNN):
+class DSMM(MatchPyramidBaseModel, ESIMDecAttBaseModel, BCNN):
     def __init__(self, params, logger, init_embedding_matrix=None):
         p = copy(params)
         p["model_name"] = p["model_name"] + "dsmm"
@@ -72,11 +73,13 @@ class DSMM(MatchPyramidBaseModel, ESIMBaseModel, BCNN):
 
                 # dense
                 deep_in_word = tf.concat([sem_seq_word_left, sem_seq_word_right], axis=-1)
-                deep_word = self._mlp_layer(deep_in_word, fc_type=self.params["fc_type"],
-                                            hidden_units=self.params["fc_hidden_units"],
-                                            dropouts=self.params["fc_dropouts"],
-                                            scope_name=self.model_name + "deep_word",
-                                            reuse=False)
+                deep_word = mlp_layer(deep_in_word, fc_type=self.params["fc_type"],
+                                      hidden_units=self.params["fc_hidden_units"],
+                                      dropouts=self.params["fc_dropouts"],
+                                      scope_name=self.model_name + "deep_word",
+                                      reuse=False,
+                                      training=self.training,
+                                      seed=self.params["random_seed"])
 
             with tf.name_scope("char_network"):
                 if self.params["attend_method"] == "context-attention":
@@ -130,11 +133,13 @@ class DSMM(MatchPyramidBaseModel, ESIMBaseModel, BCNN):
 
                 # dense
                 deep_in_char = tf.concat([sem_seq_char_left, sem_seq_char_right], axis=-1)
-                deep_char = self._mlp_layer(deep_in_char, fc_type=self.params["fc_type"],
-                                            hidden_units=self.params["fc_hidden_units"],
-                                            dropouts=self.params["fc_dropouts"],
-                                            scope_name=self.model_name + "deep_char",
-                                            reuse=False)
+                deep_char = mlp_layer(deep_in_char, fc_type=self.params["fc_type"],
+                                      hidden_units=self.params["fc_hidden_units"],
+                                      dropouts=self.params["fc_dropouts"],
+                                      scope_name=self.model_name + "deep_char",
+                                      reuse=False,
+                                      training=self.training,
+                                      seed=self.params["random_seed"])
 
             with tf.name_scope("matching_features"):
                 matching_features_word = tf.concat([

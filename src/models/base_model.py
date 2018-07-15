@@ -8,7 +8,7 @@ from sklearn.metrics import log_loss
 import config
 from utils import os_utils
 from tf_common.optimizer import *
-from tf_common.nn_module import word_dropout, dense_block, resnet_block
+from tf_common.nn_module import word_dropout, mlp_layer
 from tf_common.nn_module import encode, attend
 
 
@@ -64,8 +64,12 @@ class BaseModel(object):
         self.learning_rate = tf.train.exponential_decay(self.params["init_lr"], self.global_step,
                                                         self.params["decay_steps"], self.params["decay_rate"])
         self.augmentation_dropout = tf.train.exponential_decay(self.params["augmentation_init_dropout"], self.global_step,
-                                                               self.params["augmentation_decay_steps"],
-                                                               self.params["augmentation_decay_rate"])
+                                                               self.params["augmentation_dropout_decay_steps"],
+                                                               self.params["augmentation_dropout_decay_rate"])
+        self.augmentation_permutation = tf.train.exponential_decay(self.params["augmentation_init_permutation"],
+                                                               self.global_step,
+                                                               self.params["augmentation_permutation_decay_steps"],
+                                                               self.params["augmentation_permutation_decay_rate"])
 
 
     def _get_embedding_matrix(self, granularity="word"):
@@ -85,26 +89,6 @@ class BaseModel(object):
         return emb_matrix
 
 
-    def _mlp_layer(self, input, fc_type, hidden_units, dropouts, scope_name, reuse=False):
-        if fc_type == "fc":
-            output = dense_block(input, hidden_units=hidden_units, dropouts=dropouts,
-                                             densenet=False, scope_name=scope_name,
-                                             reuse=reuse,
-                                             training=self.training, seed=self.params["random_seed"])
-        elif fc_type == "densenet":
-            output = dense_block(input, hidden_units=hidden_units, dropouts=dropouts,
-                                             densenet=True, scope_name=scope_name,
-                                             reuse=reuse,
-                                             training=self.training, seed=self.params["random_seed"])
-        elif fc_type == "resnet":
-            output = resnet_block(input, hidden_units=hidden_units, dropouts=dropouts,
-                                              cardinality=1, dense_shortcut=True, training=self.training,
-                                              reuse=reuse,
-                                              seed=self.params["random_seed"],
-                                              scope_name=scope_name)
-        return output
-
-
     def _semantic_feature_layer(self, seq_input, seq_len, granularity="word", reuse=False):
         assert granularity in ["char", "word"]
         #### embed
@@ -119,9 +103,14 @@ class BaseModel(object):
                                seed=random_seed)
 
         #### encode
-        enc_seq = encode(emb_seq, method=self.params["encode_method"], params=self.params, sequence_length=seq_len,
+        input_dim = self.params["embedding_dim"]
+        enc_seq = encode(emb_seq, method=self.params["encode_method"],
+                         input_dim=input_dim,
+                         params=self.params,
+                         sequence_length=seq_len,
                          mask_zero=self.params["embedding_mask_zero"],
-                                   scope_name=self.model_name + "enc_seq_%s"%granularity, reuse=reuse)
+                         scope_name=self.model_name + "enc_seq_%s"%granularity, reuse=reuse,
+                         training=self.training)
 
         #### attend
         feature_dim = self.params["encode_dim"]
@@ -135,11 +124,13 @@ class BaseModel(object):
                          reuse=reuse, num_heads=self.params["attention_num_heads"])
 
         #### MLP nonlinear projection
-        sem_seq = self._mlp_layer(att_seq, fc_type=self.params["fc_type"],
-                                  hidden_units=self.params["fc_hidden_units"],
-                                  dropouts=self.params["fc_dropouts"],
-                                  scope_name=self.model_name + "sem_seq_%s"%granularity,
-                                  reuse=reuse)
+        sem_seq = mlp_layer(att_seq, fc_type=self.params["fc_type"],
+                            hidden_units=self.params["fc_hidden_units"],
+                            dropouts=self.params["fc_dropouts"],
+                            scope_name=self.model_name + "sem_seq_%s"%granularity,
+                            reuse=reuse,
+                            training=self.training,
+                            seed=self.params["random_seed"])
 
         return emb_seq, enc_seq, att_seq, sem_seq
 
@@ -164,14 +155,21 @@ class BaseModel(object):
                                     seed=random_seed)
 
         #### encode
-        enc_seq_left = encode(emb_seq_left, method=self.params["encode_method"], params=self.params,
+        input_dim = self.params["embedding_dim"]
+        enc_seq_left = encode(emb_seq_left, method=self.params["encode_method"],
+                              input_dim=input_dim,
+                              params=self.params,
                               sequence_length=seq_len_left,
-                         mask_zero=self.params["embedding_mask_zero"],
-                                   scope_name=self.model_name + "enc_seq_%s"%granularity, reuse=False)
-        enc_seq_right = encode(emb_seq_right, method=self.params["encode_method"], params=self.params,
-                              sequence_length=seq_len_right,
                               mask_zero=self.params["embedding_mask_zero"],
-                              scope_name=self.model_name + "enc_seq_%s" % granularity, reuse=True)
+                              scope_name=self.model_name + "enc_seq_%s"%granularity, reuse=False,
+                              training=self.training)
+        enc_seq_right = encode(emb_seq_right, method=self.params["encode_method"],
+                               input_dim=input_dim,
+                               params=self.params,
+                               sequence_length=seq_len_right,
+                               mask_zero=self.params["embedding_mask_zero"],
+                               scope_name=self.model_name + "enc_seq_%s" % granularity, reuse=True,
+                               training=self.training)
 
         #### attend
         # [batchsize, s1, s2]
@@ -187,16 +185,20 @@ class BaseModel(object):
                               reuse=True)
 
         #### MLP nonlinear projection
-        sem_seq_left = self._mlp_layer(att_seq_left, fc_type=self.params["fc_type"],
+        sem_seq_left = mlp_layer(att_seq_left, fc_type=self.params["fc_type"],
+                                 hidden_units=self.params["fc_hidden_units"],
+                                 dropouts=self.params["fc_dropouts"],
+                                 scope_name=self.model_name + "sem_seq_%s"%granularity,
+                                 reuse=False,
+                                 training=self.training,
+                                 seed=self.params["random_seed"])
+        sem_seq_right = mlp_layer(att_seq_right, fc_type=self.params["fc_type"],
                                   hidden_units=self.params["fc_hidden_units"],
                                   dropouts=self.params["fc_dropouts"],
-                                  scope_name=self.model_name + "sem_seq_%s"%granularity,
-                                  reuse=False)
-        sem_seq_right = self._mlp_layer(att_seq_right, fc_type=self.params["fc_type"],
-                                       hidden_units=self.params["fc_hidden_units"],
-                                       dropouts=self.params["fc_dropouts"],
-                                       scope_name=self.model_name + "sem_seq_%s" % granularity,
-                                       reuse=True)
+                                  scope_name=self.model_name + "sem_seq_%s" % granularity,
+                                  reuse=True,
+                                  training=self.training,
+                                  seed=self.params["random_seed"])
 
         return emb_seq_left, enc_seq_left, att_seq_left, sem_seq_left, \
                 emb_seq_right, enc_seq_right, att_seq_right, sem_seq_right
@@ -215,19 +217,23 @@ class BaseModel(object):
                 if "char" in self.params["granularity"]:
                     lst.append(self.matching_features_char)
                 if self.params["use_features"]:
-                    out_0 = self._mlp_layer(self.features, fc_type=self.params["fc_type"],
+                    out_0 = mlp_layer(self.features, fc_type=self.params["fc_type"],
                                       hidden_units=self.params["fc_hidden_units"],
                                       dropouts=self.params["fc_dropouts"],
                                       scope_name=self.model_name + "mlp_features",
-                                      reuse=False)
+                                      reuse=False,
+                                      training=self.training,
+                                      seed=self.params["random_seed"])
                     lst.append(out_0)
                 out = tf.concat(lst, axis=-1)
                 out = tf.layers.Dropout(self.params["final_dropout"])(out, training=self.training)
-                out = self._mlp_layer(out, fc_type=self.params["fc_type"],
-                                      hidden_units=self.params["fc_hidden_units"],
-                                      dropouts=self.params["fc_dropouts"],
-                                      scope_name=self.model_name + "mlp",
-                                      reuse=False)
+                out = mlp_layer(out, fc_type=self.params["fc_type"],
+                                hidden_units=self.params["fc_hidden_units"],
+                                dropouts=self.params["fc_dropouts"],
+                                scope_name=self.model_name + "mlp",
+                                reuse=False,
+                                training=self.training,
+                                seed=self.params["random_seed"])
                 logits = tf.layers.dense(out, 1, activation=None,
                                          kernel_initializer=tf.glorot_uniform_initializer(
                                          seed=self.params["random_seed"]),
@@ -495,7 +501,7 @@ class BaseModel(object):
         if training:
             if self.params["augmentation_init_dropout"] > 0:
                 self._dropout_augmentation(feed_dict)
-            if self.params["augmentation_permutation"]:
+            if self.params["augmentation_init_permutation"]:
                 self._permutation_augmentation(feed_dict)
 
         return feed_dict
@@ -557,29 +563,36 @@ class BaseModel(object):
             feed_dict[self.features] = np.tile(feed_dict[self.features], [2, 1])
 
 
-    def _permutation(self, val_arr, ind_arr):
-        new_arr = np.array(val_arr)
-        for i in range(val_arr.shape[0]):
-            new_arr[i, :ind_arr[i]] = np.random.permutation(new_arr[i,:ind_arr[i]])
-        return new_arr
+    def _permutation(self, val_arr, ind_arr, p):
+        if np.random.random() < p:
+            new_arr = np.array(val_arr)
+            for i in range(val_arr.shape[0]):
+                new_arr[i, :ind_arr[i]] = np.random.permutation(new_arr[i,:ind_arr[i]])
+            return new_arr
+        else:
+            return val_arr
 
 
     def _permutation_augmentation(self, feed_dict):
+        p = self.sess.run(self.augmentation_permutation)
+        if p <= self.params["augmentation_min_permutation"]:
+            return
+
         feed_dict[self.seq_word_left] = np.vstack([
             feed_dict[self.seq_word_left],
-            self._permutation(feed_dict[self.seq_word_left], feed_dict[self.seq_len_word_left]),
+            self._permutation(feed_dict[self.seq_word_left], feed_dict[self.seq_len_word_left], p),
         ])
         feed_dict[self.seq_word_right] = np.vstack([
             feed_dict[self.seq_word_right],
-            self._permutation(feed_dict[self.seq_word_right], feed_dict[self.seq_len_word_right]),
+            self._permutation(feed_dict[self.seq_word_right], feed_dict[self.seq_len_word_right], p),
         ])
         feed_dict[self.seq_char_left] = np.vstack([
             feed_dict[self.seq_char_left],
-            self._permutation(feed_dict[self.seq_char_left], feed_dict[self.seq_len_char_left]),
+            self._permutation(feed_dict[self.seq_char_left], feed_dict[self.seq_len_char_left], p),
         ])
         feed_dict[self.seq_char_right] = np.vstack([
             feed_dict[self.seq_char_right],
-            self._permutation(feed_dict[self.seq_char_right], feed_dict[self.seq_len_char_right]),
+            self._permutation(feed_dict[self.seq_char_right], feed_dict[self.seq_len_char_right], p),
         ])
         # double others
         feed_dict[self.seq_len_word_left] = np.tile(feed_dict[self.seq_len_word_left], 2)

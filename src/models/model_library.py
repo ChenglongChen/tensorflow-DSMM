@@ -1,5 +1,6 @@
 
 from models.bcnn import BCNN, ABCNN1, ABCNN2, ABCNN3
+from models.decatt import DecAtt
 from models.dssm import DSSM, CDSSM, RDSSM
 from models.dsmm import DSMM
 from models.esim import ESIM
@@ -29,5 +30,7 @@ def get_model(model_type):
         return ABCNN3
     elif model_type == "esim":
         return ESIM
+    elif model_type == "decatt":
+        return DecAtt
     else:
         return DSMM

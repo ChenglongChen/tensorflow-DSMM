@@ -8,17 +8,24 @@ from tf_common.nn_module import word_dropout
 from tf_common.nn_module import encode, attend
 
 
-class ESIMBaseModel(BaseModel):
+class ESIMDecAttBaseModel(BaseModel):
     """
-    Implementation of ESIM
+    Implementation of base model of ESIM and DecAtt
+    The difference between them lies in the encoder they use.
+        - ESIM: BiLSTM
+        - DecAtt: timedistributed dense projection
 
     Reference
-    Paper: Enhanced LSTM for Natural Language Inference
-    Keras: https://www.kaggle.com/lamdang/dl-models
-    Pytorch: https://github.com/lanwuwei/SPM_toolkit
+    Paper:
+        - ESIM: Enhanced LSTM for Natural Language Inference
+        - DecAtt: A Decomposable Attention Model for Natural Language Inference
+    Keras:
+        https://www.kaggle.com/lamdang/dl-models
+    Pytorch:
+        https://github.com/lanwuwei/SPM_toolkit
     """
     def __init__(self, params, logger, init_embedding_matrix=None):
-        super(ESIMBaseModel, self).__init__(params, logger, init_embedding_matrix)
+        super(ESIMDecAttBaseModel, self).__init__(params, logger, init_embedding_matrix)
 
 
     def _soft_attention_alignment(self, x1, x2):
@@ -54,14 +61,21 @@ class ESIMBaseModel(BaseModel):
         #                              seed=random_seed)
 
         #### encode
-        enc_seq_left = encode(emb_seq_left, method=self.params["encode_method"], params=self.params,
+        input_dim = self.params["embedding_dim"]
+        enc_seq_left = encode(emb_seq_left, method=self.params["encode_method"],
+                              input_dim=input_dim,
+                              params=self.params,
                               sequence_length=seq_len_left,
                               mask_zero=self.params["embedding_mask_zero"],
-                              scope_name=self.model_name + "esim_enc_seq_%s" % granularity, reuse=False)
-        enc_seq_right = encode(emb_seq_right, method=self.params["encode_method"], params=self.params,
+                              scope_name=self.model_name + "esim_enc_seq_%s" % granularity, reuse=False,
+                              training=self.training)
+        enc_seq_right = encode(emb_seq_right, method=self.params["encode_method"],
+                               input_dim=input_dim,
+                               params=self.params,
                                sequence_length=seq_len_right,
                                mask_zero=self.params["embedding_mask_zero"],
-                               scope_name=self.model_name + "esim_enc_seq_%s" % granularity, reuse=True)
+                               scope_name=self.model_name + "esim_enc_seq_%s" % granularity, reuse=True,
+                               training=self.training)
 
         #### align
         ali_seq_left, ali_seq_right = self._soft_attention_alignment(enc_seq_left, enc_seq_right)
@@ -80,14 +94,21 @@ class ESIMBaseModel(BaseModel):
             enc_seq_right - ali_seq_right,
         ], axis=-1)
 
-        compare_seq_left = encode(com_seq_left, method=self.params["encode_method"], params=self.params,
+        input_dim = self.params["encode_dim"] * 4
+        compare_seq_left = encode(com_seq_left, method=self.params["encode_method"],
+                                  input_dim=input_dim,
+                                  params=self.params,
                                   sequence_length=seq_len_left,
                                   mask_zero=self.params["embedding_mask_zero"],
-                                  scope_name=self.model_name + "compare_seq_%s" % granularity, reuse=False)
-        compare_seq_right = encode(com_seq_right, method=self.params["encode_method"], params=self.params,
+                                  scope_name=self.model_name + "compare_seq_%s" % granularity, reuse=False,
+                                  training=self.training)
+        compare_seq_right = encode(com_seq_right, method=self.params["encode_method"],
+                                   input_dim=input_dim,
+                                   params=self.params,
                                    sequence_length=seq_len_right,
                                    mask_zero=self.params["embedding_mask_zero"],
-                                   scope_name=self.model_name + "compare_seq_%s" % granularity, reuse=True)
+                                   scope_name=self.model_name + "compare_seq_%s" % granularity, reuse=True,
+                                   training=self.training)
 
         #### attend
         feature_dim = self.params["encode_dim"]
@@ -155,7 +176,7 @@ class ESIMBaseModel(BaseModel):
         return matching_features_word, matching_features_char
 
 
-class ESIM(ESIMBaseModel):
+class ESIM(ESIMDecAttBaseModel):
     def __init__(self, params, logger, init_embedding_matrix=None):
         p = copy(params)
         # model config
@@ -174,4 +195,4 @@ class ESIM(ESIMBaseModel):
             "fc_hidden_units": [64 * 4, 64 * 2, 64],
             "fc_dropouts": [0, 0, 0],
         })
-        super(ESIMBaseModel, self).__init__(p, logger, init_embedding_matrix)
+        super(ESIMDecAttBaseModel, self).__init__(p, logger, init_embedding_matrix)

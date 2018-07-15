@@ -220,13 +220,17 @@ def textbirnn(x, num_units, cell_type, sequence_length, num_layers=1, mask_zero=
 
 
 
-def encode(x, method, params, sequence_length=None, mask_zero=False, scope_name="encode", reuse=False):
+def encode(x, method, params, input_dim,
+           sequence_length=None, mask_zero=False,
+           scope_name="encode", reuse=False,
+           training=False, seed=0):
     """
     :param x: shape=(None,seqlen,dim)
     :param params:
     :return: shape=(None,seqlen,dim)
     """
-    dim_f = params["embedding_dim"]
+    dim_f = input_dim#params["embedding_dim"]
+    dim_p = params["project_hidden_units"][-1]
     dim_c = params["cnn_num_layers"] * len(params["cnn_filter_sizes"]) * params["cnn_num_filters"]
     dim_r = params["rnn_num_units"]
     dim_b = params["rnn_num_units"] * 2
@@ -237,6 +241,19 @@ def encode(x, method, params, sequence_length=None, mask_zero=False, scope_name=
             z = fasttext(x)
             out_list.append(z)
             params["encode_dim"] += dim_f
+        elif m == "project":
+            step_dim = tf.shape(x)[1]
+            z = tf.reshape(x, [-1, input_dim])
+            z = mlp_layer(z, fc_type=params["project_type"],
+                          hidden_units=params["project_hidden_units"],
+                          dropouts=params["project_dropouts"],
+                          scope_name=scope_name,
+                          reuse=reuse,
+                          training=training,
+                          seed=params["random_seed"])
+            z = tf.reshape(z, [-1, step_dim, params["project_hidden_units"][-1]])
+            out_list.append(z)
+            params["encode_dim"] += dim_p
         elif m == "textcnn":
             z = textcnn(x, num_layers=params["cnn_num_layers"], num_filters=params["cnn_num_filters"], filter_sizes=params["cnn_filter_sizes"],
                         timedistributed=params["cnn_timedistributed"], scope_name=scope_name, reuse=reuse)
@@ -648,3 +665,22 @@ def resnet_block(input_tensor, hidden_units, dropouts, cardinality=1, dense_shor
     return _resnet_block_mode2(input_tensor, hidden_units, dropouts, cardinality, dense_shortcut, training, seed,
                                scope_name, reuse)
 
+
+def mlp_layer(input, fc_type, hidden_units, dropouts, scope_name, reuse=False, training=False, seed=0):
+    if fc_type == "fc":
+        output = dense_block(input, hidden_units=hidden_units, dropouts=dropouts,
+                                         densenet=False, scope_name=scope_name,
+                                         reuse=reuse,
+                                         training=training, seed=seed)
+    elif fc_type == "densenet":
+        output = dense_block(input, hidden_units=hidden_units, dropouts=dropouts,
+                                         densenet=True, scope_name=scope_name,
+                                         reuse=reuse,
+                                         training=training, seed=seed)
+    elif fc_type == "resnet":
+        output = resnet_block(input, hidden_units=hidden_units, dropouts=dropouts,
+                                          cardinality=1, dense_shortcut=True, training=training,
+                                          reuse=reuse,
+                                          seed=seed,
+                                          scope_name=scope_name)
+    return output
