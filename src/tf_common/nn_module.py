@@ -229,19 +229,16 @@ def encode(x, method, params, input_dim,
     :param params:
     :return: shape=(None,seqlen,dim)
     """
-    dim_f = input_dim#params["embedding_dim"]
-    dim_p = params["project_hidden_units"][-1]
-    dim_c = params["cnn_num_layers"] * len(params["cnn_filter_sizes"]) * params["cnn_num_filters"]
-    dim_r = params["rnn_num_units"]
-    dim_b = params["rnn_num_units"] * 2
     out_list = []
     params["encode_dim"] = 0
     for m in method.split("+"):
         if m == "fasttext":
+            dim_f = input_dim  # params["embedding_dim"]
             z = fasttext(x)
             out_list.append(z)
             params["encode_dim"] += dim_f
         elif m == "project":
+            dim_p = params["project_hidden_units"][-1]
             step_dim = tf.shape(x)[1]
             z = tf.reshape(x, [-1, input_dim])
             z = mlp_layer(z, fc_type=params["project_type"],
@@ -255,16 +252,19 @@ def encode(x, method, params, input_dim,
             out_list.append(z)
             params["encode_dim"] += dim_p
         elif m == "textcnn":
+            dim_c = params["cnn_num_layers"] * len(params["cnn_filter_sizes"]) * params["cnn_num_filters"]
             z = textcnn(x, num_layers=params["cnn_num_layers"], num_filters=params["cnn_num_filters"], filter_sizes=params["cnn_filter_sizes"],
                         timedistributed=params["cnn_timedistributed"], scope_name=scope_name, reuse=reuse)
             out_list.append(z)
             params["encode_dim"] += dim_c
         elif m == "textrnn":
+            dim_r = params["rnn_num_units"]
             z = textrnn(x, num_units=params["rnn_num_units"], cell_type=params["rnn_cell_type"], num_layers=params["rnn_num_layers"],
                         sequence_length=sequence_length, mask_zero=mask_zero, scope_name=scope_name, reuse=reuse)
             out_list.append(z)
             params["encode_dim"] += dim_r
         elif method == "textbirnn":
+            dim_b = params["rnn_num_units"] * 2
             z = textbirnn(x, num_units=params["rnn_num_units"], cell_type=params["rnn_cell_type"], num_layers=params["rnn_num_layers"],
                           sequence_length=sequence_length, mask_zero=mask_zero, scope_name=scope_name, reuse=reuse)
             out_list.append(z)
