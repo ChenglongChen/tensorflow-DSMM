@@ -9,6 +9,17 @@ Ongoing project for implementing various Deep Semantic Matching Models (DSMM). D
 - search relevance
 - ...
 
+## Quickstart
+### Data
+This project is developed with regard to the data format provided in the [第三届魔镜杯大赛](https://www.ppdai.ai/mirror/goToMirrorDetail?mirrorId=1). You should see the data format description there (or see `DATA.md`) and prepared data accordingly. If you want to run a quick demo, please download data there.
+
+Your data should be placed in the `data` directory.
+
+### Demo
+```bash
+python src/main.py
+```
+
 ## Supported Models
 
 ### Representation based methods
