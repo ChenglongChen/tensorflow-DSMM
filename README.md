@@ -13,9 +13,10 @@ Ongoing project for implementing various Deep Semantic Matching Models (DSMM). D
 ### Data
 This project is developed with regard to the data format provided in the [第三届魔镜杯大赛](https://www.ppdai.ai/mirror/goToMirrorDetail?mirrorId=1). 
 
-You can see `/data/DATA.md` for the data format description and prepared data accordingly. Your data should be placed in the `data` directory.
+You can see `/data/DATA.md` for the data format description and prepared data accordingly. 
+Your data should be placed in the `data` directory. Current `data` directory also holds a toy data.
 
-If you want to run a quick demo, you can download data from the above competition link.
+If you want to run a quick demo, you can download data from the above competition link. Download is allowed after registration.
 
 ### Demo
 ```bash
